@@ -659,9 +659,8 @@ function renderCoinList() {
       </span>
     `;
     const onSelect = () => handleSelectCoin(c.symbol, c.market);
-    btn.addEventListener("pointerup", (ev) => {
-      if (ev.pointerType === "mouse") return;
-      ev.preventDefault();
+    btn.addEventListener("pointerdown", (ev) => {
+      if (ev.pointerType === "mouse" && Number(ev.button) !== 0) return;
       suppressCoinClickUntil = Date.now() + 500;
       onSelect();
     });
