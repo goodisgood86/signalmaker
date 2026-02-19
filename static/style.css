@@ -1630,6 +1630,34 @@ label.chk input[type="checkbox"] {
     padding: 5px 9px;
   }
 
+  .head-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 8px;
+    width: 100%;
+    white-space: normal;
+  }
+
+  label.inline-field.compact {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 6px;
+    width: 100%;
+  }
+
+  label.inline-field.compact > span {
+    justify-content: flex-start;
+  }
+
+  label.inline-field.compact select {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .head-actions .mini-btn {
+    width: 100%;
+  }
+
   .tip::after {
     min-width: 220px;
     max-width: min(88vw, 320px);
