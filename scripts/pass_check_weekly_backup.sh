@@ -1,4 +1,4 @@
-#!/bin/zsh
+#!/usr/bin/env bash
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -16,4 +16,9 @@ if [[ -z "${SUPABASE_SERVICE_ROLE_KEY:-}" || "${SUPABASE_SERVICE_ROLE_KEY}" == "
   exit 1
 fi
 
-./scripts/pass_check_backup.py --out-dir backups/pass_check
+PY_BIN="./.venv/bin/python"
+if [[ ! -x "$PY_BIN" ]]; then
+  PY_BIN="python"
+fi
+
+"$PY_BIN" ./scripts/pass_check_backup.py --out-dir backups/pass_check

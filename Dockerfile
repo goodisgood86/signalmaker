@@ -12,6 +12,10 @@ RUN pip install -r /app/requirements.txt
 COPY app /app/app
 COPY static /app/static
 COPY artifacts/models /app/artifacts/models
+COPY scripts /app/scripts
+RUN chmod +x /app/scripts/*.sh
+
+RUN mkdir -p /app/backups/pass_check
 
 EXPOSE 8000
 
