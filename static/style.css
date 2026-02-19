@@ -1628,6 +1628,7 @@ label.chk input[type="checkbox"] {
   .header-note {
     font-size: 12px;
     padding: 5px 9px;
+    align-self: flex-end;
   }
 
   .head-actions {
