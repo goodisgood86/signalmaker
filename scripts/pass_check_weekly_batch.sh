@@ -20,7 +20,11 @@ if [[ -z "${APP_BASE_URL:-}" ]]; then
   exit 1
 fi
 
-BASE_URL="${APP_BASE_URL%/}"
+BASE_RAW="${APP_BASE_URL%/}"
+if [[ "$BASE_RAW" != http://* && "$BASE_RAW" != https://* ]]; then
+  BASE_RAW="https://${BASE_RAW}"
+fi
+BASE_URL="$BASE_RAW"
 PY_BIN="./.venv/bin/python"
 if [[ ! -x "$PY_BIN" ]]; then
   PY_BIN="python"
