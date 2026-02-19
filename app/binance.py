@@ -2,12 +2,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import os
 from typing import Any, Dict, List, Tuple
 
 import httpx
 
-BINANCE_SPOT_BASE_URL = "https://api.binance.com"
-BINANCE_FUTURES_BASE_URL = "https://fapi.binance.com"
+BINANCE_SPOT_BASE_URL = str(os.getenv("BINANCE_SPOT_BASE_URL", "https://api.binance.com")).strip().rstrip("/")
+BINANCE_FUTURES_BASE_URL = str(os.getenv("BINANCE_FUTURES_BASE_URL", "https://fapi.binance.com")).strip().rstrip("/")
 ALLOWED_INTERVALS = {"5m", "1h", "4h"}
 ALLOWED_MARKETS = {"spot", "futures"}
 
