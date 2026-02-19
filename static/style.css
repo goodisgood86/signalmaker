@@ -1449,6 +1449,10 @@ label.chk input[type="checkbox"] {
 }
 
 @media (max-width: 1100px) {
+  .sim-box {
+    display: none !important;
+  }
+
   .wrap {
     max-width: 100%;
     padding: 12px;

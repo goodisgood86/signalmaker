@@ -110,7 +110,8 @@ function getScrollTopAndRect(host) {
 
 function updateSidebarPinNow() {
   if (!coinSideStickyEl || !mainLayoutEl) return;
-  if (window.innerWidth <= 900) {
+  const stickyPos = window.getComputedStyle(coinSideStickyEl).position;
+  if (window.innerWidth <= 1100 || stickyPos === "static") {
     clearSidebarPin();
     return;
   }
