@@ -215,11 +215,15 @@ body {
   text-align: left;
   color: var(--text);
   transition: all 0.15s ease;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
 }
 
-.coin-item:hover {
-  border-color: rgba(78, 230, 255, 0.52);
-  background: rgba(78, 230, 255, 0.08);
+@media (hover: hover) and (pointer: fine) {
+  .coin-item:hover {
+    border-color: rgba(78, 230, 255, 0.52);
+    background: rgba(78, 230, 255, 0.08);
+  }
 }
 
 .coin-item.active {

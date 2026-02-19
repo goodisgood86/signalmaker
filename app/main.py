@@ -409,9 +409,37 @@ def _build_pass_check_payload(
     }
 
 
+def _is_isotonic_degenerate(model: Any) -> bool:
+    xs = [float(v) for v in (getattr(model, "xs", []) or [])]
+    ys = [float(v) for v in (getattr(model, "ys", []) or [])]
+    if len(xs) < 4 or len(xs) != len(ys):
+        return True
+    x_min = min(xs)
+    x_max = max(xs)
+    if not math.isfinite(x_min) or not math.isfinite(x_max) or x_max <= x_min:
+        return True
+
+    # 긴 평탄 구간(plateau)이 있으면 다양한 raw 점수가 같은 확률로 눌릴 수 있다.
+    max_flat_span = 0.0
+    for i in range(1, len(xs)):
+        if abs(ys[i] - ys[i - 1]) <= 1e-9:
+            span = max(0.0, xs[i] - xs[i - 1])
+            if span > max_flat_span:
+                max_flat_span = span
+
+    # 실사용 구간에서 출력 다양성이 부족하면 보정을 비활성화한다.
+    probe = (0.25, 0.35, 0.45, 0.55, 0.65)
+    probe_vals = {round(float(apply_isotonic(model, p)), 4) for p in probe}
+    if max_flat_span >= 0.22:
+        return True
+    if len(probe_vals) <= 2:
+        return True
+    return False
+
+
 def _apply_calibration(raw_buy: float) -> tuple[float, bool, str | None]:
     isotonic = load_isotonic_model(_ISOTONIC_MODEL_PATH)
-    if isotonic is not None:
+    if isotonic is not None and (not _is_isotonic_degenerate(isotonic)):
         return apply_isotonic(isotonic, raw_buy), True, "isotonic"
     platt = load_platt_model(_PLATT_MODEL_PATH)
     if platt is not None:
@@ -2169,3 +2197,14 @@ async def ws_analysis(websocket: WebSocket):
             await asyncio.sleep(_WS_ANALYSIS_POLL_S)
     except WebSocketDisconnect:
         return
+
+
+@app.get("/{full_path:path}")
+def spa_fallback(full_path: str):
+    p = (full_path or "").lstrip("/")
+    if p.startswith("api/") or p.startswith("ws/") or p.startswith("static/"):
+        raise HTTPException(status_code=404, detail="not found")
+    index_path = Path("static/index.html")
+    if not index_path.exists():
+        raise HTTPException(status_code=404, detail="index not found")
+    return FileResponse(index_path)

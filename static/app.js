@@ -72,6 +72,9 @@ let sidebarPinRaf = 0;
 let sidebarPinObserver = null;
 let sidebarScrollHost = null;
 let sidebarPinTimer = null;
+let suppressCoinClickUntil = 0;
+let coinSwitchTimer = null;
+let coinSwitchSeq = 0;
 
 function clearSidebarPin() {
   if (!coinSideStickyEl) return;
@@ -606,6 +609,30 @@ async function simAddTrade() {
   }
 }
 
+function handleSelectCoin(symbol, market) {
+  if (selectedSymbol === symbol && selectedMarket === market) return;
+  selectedSymbol = symbol;
+  selectedMarket = market;
+  saveUiState();
+  renderProbAsset();
+  renderCoinList();
+  renderNewsPanel();
+  const reqSeq = ++coinSwitchSeq;
+  if (coinSwitchTimer) clearTimeout(coinSwitchTimer);
+  coinSwitchTimer = setTimeout(() => {
+    if (reqSeq !== coinSwitchSeq) return;
+    resetAnalysisUI("코인 변경: 계산 중...");
+    resetPassCheckUI("코인 변경: 계산 중...");
+    syncSimSymbolWithSelected();
+    fillSimEntryWithCurrentPrice();
+    loadSimTrades().catch(() => {});
+    requestAnimationFrame(() => {
+      if (reqSeq !== coinSwitchSeq) return;
+      load().catch((e) => alert(e.message));
+    });
+  }, 90);
+}
+
 function renderCoinList() {
   if (!coinListEl) return;
   coinListEl.innerHTML = "";
@@ -631,19 +658,16 @@ function renderCoinList() {
         <span class="coin-news">${newsText}</span>
       </span>
     `;
+    const onSelect = () => handleSelectCoin(c.symbol, c.market);
+    btn.addEventListener("pointerup", (ev) => {
+      if (ev.pointerType === "mouse") return;
+      ev.preventDefault();
+      suppressCoinClickUntil = Date.now() + 500;
+      onSelect();
+    });
     btn.addEventListener("click", () => {
-      selectedSymbol = c.symbol;
-      selectedMarket = c.market;
-      saveUiState();
-      renderProbAsset();
-      resetAnalysisUI("코인 변경: 계산 중...");
-      resetPassCheckUI("코인 변경: 계산 중...");
-      syncSimSymbolWithSelected();
-      fillSimEntryWithCurrentPrice();
-      renderCoinList();
-      renderNewsPanel();
-      loadSimTrades().catch(() => {});
-      load().catch((e) => alert(e.message));
+      if (Date.now() < suppressCoinClickUntil) return;
+      onSelect();
     });
     li.appendChild(btn);
     coinListEl.appendChild(li);
