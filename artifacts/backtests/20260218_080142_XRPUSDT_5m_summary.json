@@ -1,0 +1,20 @@
+{
+  "run_id": "20260218_080142_XRPUSDT_5m",
+  "symbol": "XRPUSDT",
+  "interval": "5m",
+  "market": "spot",
+  "calibration_method": "isotonic",
+  "cost": {
+    "fee_bps": 4.0,
+    "slippage_bps": 2.0
+  },
+  "rows": 915,
+  "split_train": 640,
+  "split_valid": 275,
+  "brier_raw_valid": 0.272271,
+  "brier_cal_valid": 0.258331,
+  "acc_raw_valid": 0.545455,
+  "acc_cal_valid": 0.585455,
+  "model_path": "artifacts/models/isotonic_calibrator.json",
+  "preds_path": "artifacts/backtests/20260218_080142_XRPUSDT_5m_preds.csv"
+}

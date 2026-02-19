@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>시뮬레이션 전체보기</title>
+    <style>
+      :root {
+        color-scheme: dark;
+      }
+      body {
+        margin: 0;
+        padding: 18px;
+        background: radial-gradient(1200px 600px at 20% -20%, #14335f 0%, #0a1325 45%, #081022 100%);
+        color: #eaf3ff;
+        font-family: "Pretendard", "Noto Sans KR", sans-serif;
+      }
+      .head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        margin-bottom: 12px;
+      }
+      .title {
+        font-size: 22px;
+        font-weight: 800;
+        letter-spacing: -0.3px;
+      }
+      .filters {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+        margin-bottom: 12px;
+      }
+      .stats {
+        margin-bottom: 12px;
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 9px;
+      }
+      .status-guide {
+        margin-bottom: 12px;
+        border: 1px solid rgba(173, 213, 255, 0.3);
+        border-radius: 12px;
+        padding: 10px 12px;
+        background: linear-gradient(180deg, rgba(16, 31, 57, 0.86), rgba(9, 19, 39, 0.82));
+        font-size: 13px;
+        line-height: 1.5;
+        color: rgba(234, 243, 255, 0.88);
+      }
+      .status-guide-title {
+        font-size: 13px;
+        font-weight: 800;
+        color: rgba(234, 243, 255, 0.96);
+        margin-bottom: 6px;
+      }
+      .status-guide-list {
+        margin: 0;
+        padding-left: 16px;
+      }
+      .status-guide-list li {
+        margin-bottom: 4px;
+      }
+      .status-guide-list li:last-child {
+        margin-bottom: 0;
+      }
+      .stat-card {
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        border-radius: 12px;
+        padding: 10px;
+        background: linear-gradient(180deg, rgba(15, 29, 55, 0.9), rgba(8, 16, 34, 0.88));
+      }
+      .stat-top {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 8px;
+        margin-bottom: 8px;
+      }
+      .stat-symbol {
+        font-size: 14px;
+        font-weight: 800;
+      }
+      .stat-total {
+        font-size: 12px;
+        color: rgba(234, 243, 255, 0.8);
+      }
+      .stat-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px 8px;
+        font-size: 12px;
+        color: rgba(234, 243, 255, 0.88);
+      }
+      .stat-win {
+        margin-top: 7px;
+        font-size: 12px;
+        font-weight: 700;
+        color: #7af5c6;
+      }
+      select,
+      button {
+        height: 40px;
+        border-radius: 11px;
+        border: 1px solid rgba(173, 213, 255, 0.32);
+        background: rgba(16, 28, 50, 0.88);
+        color: #eaf3ff;
+        padding: 0 12px;
+        font-size: 14px;
+      }
+      button {
+        font-weight: 760;
+        cursor: pointer;
+      }
+      .board {
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        border-radius: 14px;
+        padding: 12px;
+        background: rgba(10, 21, 41, 0.72);
+      }
+      .item {
+        border: 1px solid rgba(255, 255, 255, 0.16);
+        border-radius: 12px;
+        padding: 12px;
+        background: linear-gradient(180deg, rgba(8, 19, 38, 0.9), rgba(4, 12, 27, 0.85));
+        margin-bottom: 10px;
+      }
+      .item:last-child {
+        margin-bottom: 0;
+      }
+      .row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+      }
+      .symbol {
+        font-size: 16px;
+        font-weight: 790;
+        letter-spacing: -0.2px;
+      }
+      .head-right {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .created {
+        font-size: 12px;
+        color: rgba(234, 243, 255, 0.72);
+      }
+      .badge {
+        border: 1px solid rgba(255, 255, 255, 0.25);
+        border-radius: 999px;
+        padding: 4px 10px;
+        font-size: 12px;
+        font-weight: 800;
+      }
+      .b-tp { color: #7af5c6; border-color: rgba(122, 245, 198, 0.5); }
+      .b-sl { color: #ff9ab0; border-color: rgba(255, 154, 176, 0.5); }
+      .b-open { color: #ffd68a; border-color: rgba(255, 214, 138, 0.5); }
+      .b-unfilled { color: #9ec3ff; border-color: rgba(158, 195, 255, 0.48); }
+      .b-fail { color: #ffb6d1; border-color: rgba(255, 182, 209, 0.5); }
+      .prices {
+        margin-top: 10px;
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 10px;
+      }
+      .p {
+        border: 1px solid rgba(255, 255, 255, 0.15);
+        border-radius: 10px;
+        padding: 8px 9px;
+        font-size: 18px;
+        font-weight: 760;
+        font-variant-numeric: tabular-nums;
+      }
+      .p span {
+        display: block;
+        color: rgba(234, 243, 255, 0.72);
+        font-size: 11px;
+        font-weight: 600;
+        margin-bottom: 3px;
+      }
+      .pager {
+        margin-top: 12px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+      }
+      #pageLabel {
+        min-width: 88px;
+        text-align: center;
+        font-size: 13px;
+        color: rgba(234, 243, 255, 0.92);
+      }
+      @media (max-width: 700px) {
+        .filters {
+          grid-template-columns: 1fr;
+        }
+        .stats {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+        .prices {
+          grid-template-columns: 1fr;
+        }
+      }
+      @media (max-width: 520px) {
+        .stats {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="head">
+      <div class="title">시뮬레이션 전체보기</div>
+    </div>
+    <div class="filters">
+      <select id="filterSymbol"></select>
+      <select id="filterStatus"></select>
+    </div>
+    <div class="status-guide">
+      <div class="status-guide-title">거래 상태 안내</div>
+      <ul class="status-guide-list">
+        <li><strong>미체결</strong>: 진입가 미도달</li>
+        <li><strong>거래중</strong>: 진입가 도달 후 TP/SL 미도달</li>
+        <li><strong>익절/손절</strong>: TP/SL 도달</li>
+        <li><strong>예측실패</strong>: 작성 후 6일 내 TP/SL 미도달</li>
+      </ul>
+    </div>
+    <div id="coinStats" class="stats"></div>
+    <div class="board">
+      <div id="list"></div>
+      <div class="pager">
+        <button id="prevBtn">이전</button>
+        <div id="pageLabel">1 페이지</div>
+        <button id="nextBtn">다음</button>
+      </div>
+    </div>
+    <script src="/static/simulations_popup.js?v=20260219a"></script>
+  </body>
+  </html>

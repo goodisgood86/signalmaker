@@ -1,0 +1,12 @@
+.DS_Store
+.venv/
+__pycache__/
+*.pyc
+
+# local secrets
+configs/ops.env
+*.env.local
+
+# local logs
+*.log
+tmp/

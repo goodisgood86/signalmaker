@@ -1,0 +1,164 @@
+[
+  {
+    "id": 22,
+    "symbol": "BTCUSDT",
+    "market": "spot",
+    "interval": "5m",
+    "period": "24h",
+    "last_signal_time_ms": 1767306000000,
+    "updated_ms": 1771479346916
+  },
+  {
+    "id": 23,
+    "symbol": "BTCUSDT",
+    "market": "spot",
+    "interval": "5m",
+    "period": "3d",
+    "last_signal_time_ms": 1767306000000,
+    "updated_ms": 1771479346916
+  },
+  {
+    "id": 24,
+    "symbol": "BTCUSDT",
+    "market": "spot",
+    "interval": "5m",
+    "period": "7d",
+    "last_signal_time_ms": 1767306000000,
+    "updated_ms": 1771479346916
+  },
+  {
+    "id": 25,
+    "symbol": "ETHUSDT",
+    "market": "spot",
+    "interval": "5m",
+    "period": "24h",
+    "last_signal_time_ms": 1767320400000,
+    "updated_ms": 1771479464860
+  },
+  {
+    "id": 26,
+    "symbol": "ETHUSDT",
+    "market": "spot",
+    "interval": "5m",
+    "period": "3d",
+    "last_signal_time_ms": 1767320400000,
+    "updated_ms": 1771479464860
+  },
+  {
+    "id": 27,
+    "symbol": "ETHUSDT",
+    "market": "spot",
+    "interval": "5m",
+    "period": "7d",
+    "last_signal_time_ms": 1767320400000,
+    "updated_ms": 1771479464860
+  },
+  {
+    "id": 28,
+    "symbol": "XRPUSDT",
+    "market": "spot",
+    "interval": "5m",
+    "period": "24h",
+    "last_signal_time_ms": 1767565200000,
+    "updated_ms": 1771479582986
+  },
+  {
+    "id": 29,
+    "symbol": "XRPUSDT",
+    "market": "spot",
+    "interval": "5m",
+    "period": "3d",
+    "last_signal_time_ms": 1767565200000,
+    "updated_ms": 1771479582986
+  },
+  {
+    "id": 30,
+    "symbol": "XRPUSDT",
+    "market": "spot",
+    "interval": "5m",
+    "period": "7d",
+    "last_signal_time_ms": 1767565200000,
+    "updated_ms": 1771479582986
+  },
+  {
+    "id": 31,
+    "symbol": "SUIUSDT",
+    "market": "spot",
+    "interval": "5m",
+    "period": "24h",
+    "last_signal_time_ms": 1765549500000,
+    "updated_ms": 1771479818710
+  },
+  {
+    "id": 32,
+    "symbol": "SUIUSDT",
+    "market": "spot",
+    "interval": "5m",
+    "period": "3d",
+    "last_signal_time_ms": 1765549500000,
+    "updated_ms": 1771479818710
+  },
+  {
+    "id": 33,
+    "symbol": "SUIUSDT",
+    "market": "spot",
+    "interval": "5m",
+    "period": "7d",
+    "last_signal_time_ms": 1765549500000,
+    "updated_ms": 1771479818710
+  },
+  {
+    "id": 34,
+    "symbol": "SOLUSDT",
+    "market": "spot",
+    "interval": "5m",
+    "period": "24h",
+    "last_signal_time_ms": 1767306600000,
+    "updated_ms": 1771479936808
+  },
+  {
+    "id": 35,
+    "symbol": "SOLUSDT",
+    "market": "spot",
+    "interval": "5m",
+    "period": "3d",
+    "last_signal_time_ms": 1767306600000,
+    "updated_ms": 1771479936808
+  },
+  {
+    "id": 36,
+    "symbol": "SOLUSDT",
+    "market": "spot",
+    "interval": "5m",
+    "period": "7d",
+    "last_signal_time_ms": 1767306600000,
+    "updated_ms": 1771479936808
+  },
+  {
+    "id": 37,
+    "symbol": "CROSSUSDT",
+    "market": "futures",
+    "interval": "5m",
+    "period": "24h",
+    "last_signal_time_ms": 1769697000000,
+    "updated_ms": 1771480054576
+  },
+  {
+    "id": 38,
+    "symbol": "CROSSUSDT",
+    "market": "futures",
+    "interval": "5m",
+    "period": "3d",
+    "last_signal_time_ms": 1769697000000,
+    "updated_ms": 1771480054576
+  },
+  {
+    "id": 39,
+    "symbol": "CROSSUSDT",
+    "market": "futures",
+    "interval": "5m",
+    "period": "7d",
+    "last_signal_time_ms": 1769697000000,
+    "updated_ms": 1771480054576
+  }
+]

@@ -1,0 +1,311 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SignalMaker</title>
+    <link rel="stylesheet" href="/static/style.css?v=20260219ak" />
+    <script src="https://unpkg.com/lightweight-charts@4.2.1/dist/lightweight-charts.standalone.production.js"></script>
+  </head>
+  <body>
+    <div class="wrap">
+      <header class="header">
+        <div class="title">SignalMaker</div>
+        <div class="header-note">코인 가격 : 바이낸스 기준</div>
+      </header>
+
+      <main class="main">
+        <div class="coin-side-sticky">
+          <aside class="card coin-side">
+          <div class="card-title">제공 코인</div>
+          <div class="coin-help">좌측 코인 선택 시 해당 심볼 차트/분석을 표시합니다.</div>
+          <ul id="coinList" class="coin-list"></ul>
+          <div class="sim-box">
+            <div class="sim-compose-box">
+              <div class="sim-head">
+                <div class="sim-title">시뮬레이션 작성</div>
+                <button id="simToggleBtn" class="sim-btn">시뮬레이션 작성</button>
+              </div>
+              <div class="sim-compose-note">진입시점이 실제로 맞는지 직접 시뮬레이션 해보세요.</div>
+              <div class="sim-form is-collapsed" id="simForm">
+                <div class="sim-row">
+                  <select id="simSymbol"></select>
+                </div>
+                <div class="sim-row">
+                  <div class="sim-entry-wrap">
+                    <input id="simEntry" type="number" min="0" step="0.000001" placeholder="구입가(진입가)" />
+                    <label class="sim-check inline"><input id="simUseCurrent" type="checkbox" /> 현재가 사용</label>
+                  </div>
+                </div>
+              <div class="sim-row dual">
+                <input id="simTp" type="number" min="0" step="0.000001" placeholder="익절가(TP)" />
+                <input id="simSl" type="number" min="0" step="0.000001" placeholder="손절가(SL)" />
+              </div>
+              <div class="sim-note" id="simRuleNote" hidden>익절가는 구입가 이상으로, 손절가는 구입가 이하로 설정해주세요.</div>
+              <div class="sim-row sim-actions">
+                <button id="simAddBtn" class="sim-btn primary">시뮬레이션 추가</button>
+              </div>
+            </div>
+              <div class="sim-status" id="simStatus"></div>
+            </div>
+            <div class="sim-board-box">
+              <div class="sim-board-head">
+                <div class="sim-title">시뮬레이션 게시판</div>
+                <button id="simOpenAllBtn" class="sim-btn ghost">전체보기</button>
+              </div>
+              <div class="sim-list" id="simList"></div>
+            </div>
+          </div>
+          </aside>
+        </div>
+
+        <section class="content">
+          <section class="card">
+            <div class="section-head">
+              <div class="prob-title-row">
+                <div class="card-title">확률</div>
+                <span class="prob-asset" id="probAsset">-</span>
+              </div>
+              <div class="head-actions">
+                <label class="inline-field compact">
+                  <span>
+                    분석모드
+                    <span
+                      class="tip"
+                      tabindex="0"
+                      data-tip="1) 단일TF: 현재 선택한 1개 타임프레임만 분석&#10;2) MTF: 4h(방향) + 1h(셋업) + 5m(타이밍) 결합 분석"
+                      >?</span
+                    >
+                  </span>
+                  <select id="analysisMode">
+                    <option value="single">단일TF</option>
+                    <option value="mtf">MTF(4h/1h/5m)</option>
+                  </select>
+                </label>
+                <label class="inline-field compact">
+                  <span>
+                    분석 타임프레임
+                    <span class="tip" tabindex="0" data-tip="1) 5m: 짧은 흐름&#10;2) 1h: 중간 흐름&#10;3) 4h: 큰 흐름">?</span>
+                  </span>
+                  <select id="analysisInterval">
+                    <option value="">-</option>
+                    <option value="5m">5m</option>
+                    <option value="1h">1h</option>
+                    <option value="4h">4h</option>
+                  </select>
+                </label>
+                <button id="refresh" class="mini-btn">새로고침</button>
+              </div>
+            </div>
+            <div class="action-panel">
+              <div class="action-top">
+                <span class="action-badge" id="actionBadge">관망</span>
+                <div class="action-title" id="actionTitle">아직 확신이 약해 관망이 유리합니다.</div>
+              </div>
+              <div class="action-sub" id="actionSubtitle">신뢰도와 레짐을 함께 확인해 진입 타이밍을 기다리세요.</div>
+              <details class="action-explain-details">
+                <summary class="action-explain-summary">확률 상세 내용 보기</summary>
+                <div class="action-explain" id="actionExplain">-</div>
+              </details>
+            </div>
+            <div class="prob">
+              <div class="prob-item">
+                <div class="prob-label">매수 % <span class="tip" tabindex="0" data-tip="1) 시그널 점수를 0~100%로 변환한 값&#10;2) 높을수록 매수 우위">?</span></div>
+                <div class="prob-value" id="buyPct">-</div>
+              </div>
+              <div class="prob-item">
+                <div class="prob-label">매도 % <span class="tip" tabindex="0" data-tip="1) 매수와 반대 방향 점수&#10;2) 높을수록 매도/리스크축소 우위">?</span></div>
+                <div class="prob-value" id="sellPct">-</div>
+              </div>
+              <div class="prob-item">
+                <div class="prob-label">신뢰도 <span class="tip" tabindex="0" data-tip="1) 지표가 같은 방향일수록 상승&#10;2) 높을수록 신호 일치도 큼&#10;3) PASS 최소선은 레짐별로 다름(추세 30% / 횡보 36% / 고변동 42%)&#10;4) 45%+: 비교적 강한 신호">?</span></div>
+                <div class="prob-value" id="confidence">-</div>
+              </div>
+              <div class="prob-item">
+                <div class="prob-label">레짐 <span class="tip" tabindex="0" data-tip="1) 시장 상태 구분&#10;2) TREND=추세&#10;3) RANGE=횡보&#10;4) HIGH_VOL=고변동">?</span></div>
+                <div class="prob-value" id="regime">-</div>
+              </div>
+              <div class="prob-item">
+                <div class="prob-label">거래량 상태 <span class="tip" tabindex="0" data-tip="1) 분석 타임프레임 기준 거래량&#10;2) 직전 마감봉 거래량을 최근 20봉 평균과 비교&#10;3) 1.15x 이상: 평균 이상&#10;4) 0.85x 미만: 평균 이하&#10;5) 그 사이: 평균수준">?</span></div>
+                <div class="prob-value" id="volumeState">-</div>
+              </div>
+            </div>
+            <details class="guide-details">
+              <summary class="summary-head">타임프레임/분석모드 사용 가이드</summary>
+              <div class="guide-box">
+                <div class="guide-line"><strong>1. 단일TF는 이렇게 반영</strong><br />입력: 현재 선택한 타임프레임 1개(5m 또는 1h 또는 4h)<br />계산: 해당 TF 지표점수만 계산<br />영향: 타임프레임 변경 시 확률/신뢰도/결론이 함께 바뀜</div>
+                <div class="guide-line"><strong>2. MTF는 이렇게 반영</strong><br />입력: 4h+1h+5m를 동시에 계산<br />계산: 4h(필터)+1h(셋업)+5m(트리거) 가중 결합 + 4h 보정<br />영향: 최종 확률은 3개 TF 합산 기준으로 결정</div>
+                <div class="guide-line"><strong>3. MTF에서 차트 시간봉 버튼 의미</strong><br />분석 확률을 바꾸는 버튼이 아니라, 차트 표시(캔들) 전환용 버튼</div>
+                <div class="guide-line"><strong>4. 시간봉 참고 방법</strong><br />1) 큰 흐름은 4h 우선 확인<br />2) 준비 구간은 1h 확인<br />3) 진입 타이밍은 5m 확인<br />4) 4h/1h와 5m가 다르면 단기 흔들림 가능성으로 해석</div>
+              </div>
+            </details>
+            <details class="calc-details">
+              <summary class="summary-head">계산 방식/상세</summary>
+              <div class="explain-detail" id="explainDetail"></div>
+            </details>
+            <div class="meta" id="asof">-</div>
+          </section>
+
+          <section class="card">
+            <div class="card-title-row">
+              <div class="card-title">진입시점 (피보나치 기준)</div>
+              <span class="swing-badge" id="entrySwingBadge">스윙 상태: -</span>
+            </div>
+            <div class="entry-info">
+              <div class="entry-info-line"><strong>기준:</strong> 최근 200봉, 피벗 스윙 우선(없으면 최근 고저점 대체)</div>
+              <div class="entry-info-line"><strong>상승 스윙 (L→H):</strong> 저점→고점 기준으로 피보 되돌림 레벨 표시</div>
+              <div class="entry-info-line"><strong>하락 스윙 (H→L):</strong> 고점→저점 기준으로 피보 반등 되돌림 레벨 표시</div>
+            </div>
+            <div class="decision-box">
+              <div class="decision-title">진입 판단 순서: 확률 → 피보 구간 → 실행</div>
+              <div class="decision-steps">
+                <div class="decision-step">
+                  <div class="decision-step-k">1) 확률 판단</div>
+                  <div class="decision-step-s" id="stepProbStatus">-</div>
+                  <div class="decision-step-v" id="stepProbDetail">-</div>
+                </div>
+                <div class="decision-step">
+                  <div class="decision-step-k">2) 피보 구간 확인</div>
+                  <div class="decision-step-s" id="stepFibStatus">-</div>
+                  <div class="decision-step-v" id="stepFibDetail">-</div>
+                </div>
+                <div class="decision-step">
+                  <div class="decision-step-k">3) 실행 판단</div>
+                  <div class="decision-step-s" id="stepExecStatus">-</div>
+                  <div class="decision-step-v" id="stepExecDetail">-</div>
+                </div>
+              </div>
+              <div class="decision-final-box">
+                <div class="decision-final-k">4) 최종 판단</div>
+                <div class="decision-step-s" id="stepFinalStatus">-</div>
+                <div class="decision-final-v" id="decisionFinal">-</div>
+              </div>
+              <div class="decision-backcheck is-pending" id="passCheckSummary">
+                <div class="passcheck-head">
+                  <div class="passcheck-title">최근 PASS 검증</div>
+                  <div class="passcheck-head-right">
+                    <div class="passcheck-note" id="passCheckModeNote">-</div>
+                    <label class="passcheck-period-wrap">
+                      <span>기간</span>
+                      <select id="passCheckPeriod">
+                        <option value="24h">24h</option>
+                        <option value="3d" selected>3d</option>
+                        <option value="7d">7d</option>
+                      </select>
+                    </label>
+                  </div>
+                </div>
+                <div class="passcheck-metrics">
+                  <div class="passcheck-item">
+                    <div class="passcheck-k">검증 구간</div>
+                    <div class="passcheck-v" id="passCheckBars">-</div>
+                  </div>
+                  <div class="passcheck-item">
+                    <div class="passcheck-k">PASS + 진입가 달성</div>
+                    <div class="passcheck-v" id="passCheckPasses">-</div>
+                  </div>
+                  <div class="passcheck-item passcheck-item-hit">
+                    <div class="passcheck-k">익절가 달성</div>
+                    <div class="passcheck-v" id="passCheckHitRate">-</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <details class="entry-details">
+              <summary class="entry-summary">피보나치 상세내용 보기</summary>
+              <div class="entry-table">
+                <div class="entry-row">
+                  <div class="entry-k">스윙 상태</div>
+                  <div class="entry-v" id="entryTableSwing">-</div>
+                  <div class="entry-d">현재 피보 스윙이 상승 추세인지, 하락 후 반등 구간인지 구분</div>
+                </div>
+                <div class="entry-row">
+                  <div class="entry-k" id="entryLabel">진입 기준가</div>
+                  <div class="entry-v" id="entryZone">-</div>
+                  <div class="entry-d">피보 되돌림 기준으로 진입이 가능한 가격</div>
+                </div>
+                <div class="entry-row">
+                  <div class="entry-k" id="targetLabel">진입 후 익절가(1차/2차)</div>
+                  <div class="entry-v" id="targetZone">-</div>
+                  <div class="entry-d">진입가 이후 상승하여 익절을 고려하는 가격</div>
+                </div>
+                <div class="entry-row">
+                  <div class="entry-k" id="stopLabel">손절가</div>
+                  <div class="entry-v" id="stopZone">-</div>
+                  <div class="entry-d">현재 시나리오가 무효가 되는 손절 기준 가격</div>
+                </div>
+                <div class="entry-row">
+                  <div class="entry-k">플랜 지표</div>
+                  <div class="entry-v" id="entryPlanMetrics">-</div>
+                  <div class="entry-d">진입 대비 예상 수익률/손실률과 보상대비위험(RR)</div>
+                </div>
+                <div class="entry-row">
+                  <div class="entry-k">주요 피보 가격</div>
+                  <div class="entry-v" id="entryFibLevels">-</div>
+                  <div class="entry-d">핵심 레벨(0.236 / 0.382 / 0.5 / 0.618 / 0.786)의 현재 가격</div>
+                </div>
+                <div class="entry-row">
+                  <div class="entry-k">주요 피보 구간</div>
+                  <div class="entry-v" id="entryFibZones">-</div>
+                  <div class="entry-d">스윙 기준으로 자주 반응하는 구간(진입/정리/반등 체크)</div>
+                </div>
+              </div>
+            </details>
+          </section>
+
+          <section class="card">
+            <div class="section-head">
+              <div class="card-title">코인 뉴스 (최근 1일) <span class="news-note">※ 단순 키워드 중심 분류이기 때문에 긍정/부정/중립 분류가 정확하지 않을 수 있습니다.</span></div>
+              <button id="newsRefresh" class="mini-btn">뉴스 새로고침</button>
+            </div>
+            <div class="news-summary" id="newsSummary">-</div>
+            <div class="news-list" id="newsList"></div>
+          </section>
+
+          <section class="card">
+            <div class="chart-head">
+              <div class="card-title">차트</div>
+              <label class="inline-field">
+                <span>차트 시간봉</span>
+                <select id="chartInterval">
+                  <option value="5m">5m</option>
+                  <option value="1h">1h</option>
+                  <option value="4h">4h</option>
+                </select>
+              </label>
+            </div>
+            <div class="controls-panel chart-controls">
+              <div class="controls">
+                <label class="chk">
+                  <span>피보나치</span>
+                  <input id="fibToggle" type="checkbox" checked />
+                </label>
+                <label class="chk">
+                  <span>AVWAP</span>
+                  <input id="avwapToggle" type="checkbox" checked />
+                </label>
+                <label class="chk">
+                  <span>VP(POC/HVN/LVN)</span>
+                  <input id="vpToggle" type="checkbox" checked />
+                </label>
+                <label class="chk">
+                  <span>거래량</span>
+                  <input id="volumeToggle" type="checkbox" checked />
+                </label>
+              </div>
+            </div>
+            <div id="chart" class="chart"></div>
+          </section>
+        </section>
+      </main>
+
+      <footer class="footer">
+        <div class="hint">
+          주의: 본 화면의 확률은 지표 기반 휴리스틱(교육/정보용)이며 투자 성과를 보장하지 않습니다.
+        </div>
+      </footer>
+    </div>
+
+    <script src="/static/app.js?v=20260219zj"></script>
+  </body>
+</html>

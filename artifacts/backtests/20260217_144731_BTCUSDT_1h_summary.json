@@ -1,0 +1,19 @@
+{
+  "run_id": "20260217_144731_BTCUSDT_1h",
+  "symbol": "BTCUSDT",
+  "interval": "1h",
+  "calibration_method": "isotonic",
+  "cost": {
+    "fee_bps": 4.0,
+    "slippage_bps": 2.0
+  },
+  "rows": 915,
+  "split_train": 640,
+  "split_valid": 275,
+  "brier_raw_valid": 0.303158,
+  "brier_cal_valid": 0.29156,
+  "acc_raw_valid": 0.418182,
+  "acc_cal_valid": 0.530909,
+  "model_path": "artifacts/models/isotonic_calibrator.json",
+  "preds_path": "artifacts/backtests/20260217_144731_BTCUSDT_1h_preds.csv"
+}

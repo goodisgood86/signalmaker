@@ -1,0 +1,56 @@
+[
+  {
+    "id": 1,
+    "symbol": "CROSSUSDT",
+    "market": "futures",
+    "interval": "5m",
+    "period": "24h",
+    "last_signal_time_ms": 1771335900000,
+    "updated_ms": 1771424855177
+  },
+  {
+    "id": 2,
+    "symbol": "BTCUSDT",
+    "market": "spot",
+    "interval": "5m",
+    "period": "3d",
+    "last_signal_time_ms": 1771164300000,
+    "updated_ms": 1771425120924
+  },
+  {
+    "id": 3,
+    "symbol": "CROSSUSDT",
+    "market": "futures",
+    "interval": "5m",
+    "period": "3d",
+    "last_signal_time_ms": 1771165500000,
+    "updated_ms": 1771425293520
+  },
+  {
+    "id": 4,
+    "symbol": "ETHUSDT",
+    "market": "spot",
+    "interval": "5m",
+    "period": "3d",
+    "last_signal_time_ms": 1771161600000,
+    "updated_ms": 1771425293501
+  },
+  {
+    "id": 5,
+    "symbol": "BTCUSDT",
+    "market": "spot",
+    "interval": "5m",
+    "period": "24h",
+    "last_signal_time_ms": 1771337700000,
+    "updated_ms": 1771425653538
+  },
+  {
+    "id": 6,
+    "symbol": "BTCUSDT",
+    "market": "spot",
+    "interval": "5m",
+    "period": "7d",
+    "last_signal_time_ms": 1770818100000,
+    "updated_ms": 1771425653538
+  }
+]

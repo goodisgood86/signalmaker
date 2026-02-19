@@ -1,0 +1,15 @@
+{
+  "symbol": "BTCUSDT",
+  "interval": "1h",
+  "limit": 1000,
+  "calibration_method": "isotonic",
+  "strategy": {
+    "tp_pct": 0.018,
+    "sl_pct": 0.012,
+    "max_holding_bars": 24
+  },
+  "cost": {
+    "fee_bps": 4,
+    "slippage_bps": 2
+  }
+}

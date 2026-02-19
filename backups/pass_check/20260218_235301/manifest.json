@@ -1,0 +1,14 @@
+{
+  "created_at": "2026-02-18T23:53:01.067958",
+  "supabase_url": "https://lmjqhtfavmtqitbimgqm.supabase.co",
+  "tables": {
+    "pass_check_events": {
+      "rows": 1804,
+      "file": "backups/pass_check/20260218_235301/pass_check_events.json"
+    },
+    "pass_check_progress": {
+      "rows": 6,
+      "file": "backups/pass_check/20260218_235301/pass_check_progress.json"
+    }
+  }
+}

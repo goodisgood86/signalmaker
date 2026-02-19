@@ -1,0 +1,14 @@
+{
+  "run_id": "20260217_144428_BTCUSDT_1h",
+  "symbol": "BTCUSDT",
+  "interval": "1h",
+  "rows": 915,
+  "split_train": 640,
+  "split_valid": 275,
+  "brier_raw_valid": 0.303947,
+  "brier_cal_valid": 0.283494,
+  "acc_raw_valid": 0.414545,
+  "acc_cal_valid": 0.494545,
+  "model_path": "artifacts/models/platt_calibrator.json",
+  "preds_path": "artifacts/backtests/20260217_144428_BTCUSDT_1h_preds.csv"
+}
