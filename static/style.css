@@ -1600,6 +1600,10 @@ label.chk input[type="checkbox"] {
 }
 
 @media (max-width: 640px) {
+  .sim-box {
+    display: none !important;
+  }
+
   .coin-side-sticky {
     position: static !important;
     top: auto;
