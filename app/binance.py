@@ -9,6 +9,17 @@ import httpx
 
 BINANCE_SPOT_BASE_URL = str(os.getenv("BINANCE_SPOT_BASE_URL", "https://api.binance.com")).strip().rstrip("/")
 BINANCE_FUTURES_BASE_URL = str(os.getenv("BINANCE_FUTURES_BASE_URL", "https://fapi.binance.com")).strip().rstrip("/")
+BINANCE_SPOT_FALLBACK_BASE_URL = str(os.getenv("BINANCE_SPOT_FALLBACK_BASE_URL", "https://api.binance.us")).strip().rstrip("/")
+BINANCE_FUTURES_FALLBACK_BASE_URLS = [
+    x.strip().rstrip("/")
+    for x in str(
+        os.getenv(
+            "BINANCE_FUTURES_FALLBACK_BASE_URLS",
+            "https://fapi1.binance.com,https://fapi2.binance.com,https://fapi3.binance.com",
+        )
+    ).split(",")
+    if x.strip()
+]
 ALLOWED_INTERVALS = {"5m", "1h", "4h"}
 ALLOWED_MARKETS = {"spot", "futures"}
 
@@ -33,8 +44,10 @@ class Kline:
 
 
 class BinanceClient:
-    def __init__(self, *, base_url: str) -> None:
+    def __init__(self, *, base_url: str, market: str, fallback_base_urls: List[str] | None = None) -> None:
         self._client = httpx.AsyncClient(base_url=base_url, timeout=10.0)
+        self._market = market
+        self._fallback_base_urls = [u for u in (fallback_base_urls or []) if u and u != str(self._client.base_url).rstrip("/")]
 
     async def aclose(self) -> None:
         await self._client.aclose()
@@ -46,11 +59,28 @@ class BinanceClient:
         if limit < 50 or limit > 1500:
             raise ValueError("limit must be between 50 and 1500")
 
-        # base_url에 따라 spot(/api/v3/klines), futures(/fapi/v1/klines) 분기
-        path = "/fapi/v1/klines" if "fapi.binance.com" in str(self._client.base_url) else "/api/v3/klines"
-        resp = await self._client.get(path, params={"symbol": symbol, "interval": interval, "limit": limit})
-        resp.raise_for_status()
-        raw: List[List[Any]] = resp.json()
+        path = "/fapi/v1/klines" if self._market == "futures" else "/api/v3/klines"
+        params = {"symbol": symbol, "interval": interval, "limit": limit}
+
+        resp = await self._client.get(path, params=params)
+        raw: List[List[Any]] | None = None
+        if resp.status_code < 400:
+            raw = resp.json()
+        else:
+            retryable = resp.status_code in {418, 429, 451, 403}
+            if retryable and self._fallback_base_urls:
+                for fb_url in self._fallback_base_urls:
+                    try:
+                        async with httpx.AsyncClient(base_url=fb_url, timeout=10.0) as fb:
+                            fb_resp = await fb.get(path, params=params)
+                        if fb_resp.status_code < 400:
+                            raw = fb_resp.json()
+                            break
+                    except Exception:
+                        continue
+            if raw is None:
+                resp.raise_for_status()
+                raw = []
 
         out: List[Kline] = []
         for row in raw:
@@ -89,8 +119,10 @@ class _TTLCache:
 
 class CachedBinanceClient:
     def __init__(self, *, ttl_seconds: float = 10.0) -> None:
-        self._spot = BinanceClient(base_url=BINANCE_SPOT_BASE_URL)
-        self._futures = BinanceClient(base_url=BINANCE_FUTURES_BASE_URL)
+        spot_fallbacks: List[str] = [BINANCE_SPOT_FALLBACK_BASE_URL] if BINANCE_SPOT_FALLBACK_BASE_URL else []
+        futures_fallbacks: List[str] = BINANCE_FUTURES_FALLBACK_BASE_URLS[:]
+        self._spot = BinanceClient(base_url=BINANCE_SPOT_BASE_URL, market="spot", fallback_base_urls=spot_fallbacks)
+        self._futures = BinanceClient(base_url=BINANCE_FUTURES_BASE_URL, market="futures", fallback_base_urls=futures_fallbacks)
         self._cache = _TTLCache(ttl_seconds=ttl_seconds)
 
     async def aclose(self) -> None:
