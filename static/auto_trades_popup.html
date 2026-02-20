@@ -1,0 +1,1000 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>자동매매 기록 전체보기</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg-top: #162a4a;
+        --bg-mid: #0d1a34;
+        --bg-bot: #0a1323;
+        --panel-bg: rgba(11, 22, 43, 0.78);
+        --panel-line: rgba(191, 216, 255, 0.2);
+        --text: #eaf3ff;
+        --muted: rgba(234, 243, 255, 0.78);
+      }
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background:
+          radial-gradient(1100px 560px at 20% -18%, var(--bg-top) 0%, transparent 50%),
+          linear-gradient(180deg, var(--bg-mid) 0%, var(--bg-bot) 100%);
+        color: var(--text);
+        font-family: "Pretendard", "Noto Sans KR", sans-serif;
+      }
+      .mobile-shell {
+        width: min(920px, 100%);
+        margin: 0 auto;
+        padding: 12px 12px 20px;
+      }
+      .head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        margin-bottom: 10px;
+      }
+      .title {
+        font-size: 20px;
+        font-weight: 800;
+        letter-spacing: -0.2px;
+      }
+      .head-tools {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .logic-open-btn {
+        width: auto;
+        min-width: 88px;
+        height: 34px;
+        padding: 0 12px;
+        border-radius: 9px;
+        font-size: 12px;
+      }
+      .logic-modal {
+        position: fixed;
+        inset: 0;
+        z-index: 220;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 14px;
+        background: rgba(2, 7, 18, 0.64);
+        backdrop-filter: blur(2px);
+      }
+      .logic-modal[hidden] {
+        display: none !important;
+      }
+      .logic-modal-dialog {
+        width: min(740px, 100%);
+        max-height: calc(100vh - 28px);
+        overflow: hidden;
+        border-radius: 14px;
+        border: 1px solid rgba(185, 211, 255, 0.26);
+        background: linear-gradient(180deg, rgba(8, 18, 38, 0.98), rgba(4, 12, 27, 0.98));
+        box-shadow: 0 24px 58px rgba(0, 0, 0, 0.42);
+      }
+      .logic-modal-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        padding: 12px 14px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+      }
+      .logic-modal-title {
+        font-size: 15px;
+        font-weight: 820;
+      }
+      .logic-modal-close {
+        width: auto;
+        min-width: 74px;
+        height: 32px;
+        padding: 0 10px;
+        font-size: 12px;
+      }
+      .logic-modal-body {
+        overflow: auto;
+        max-height: calc(100vh - 120px);
+        padding: 12px 14px 14px;
+      }
+      .logic-block {
+        border: 1px solid rgba(180, 206, 255, 0.18);
+        border-radius: 10px;
+        padding: 10px 11px;
+        background: rgba(10, 20, 39, 0.56);
+      }
+      .logic-block + .logic-block {
+        margin-top: 8px;
+      }
+      .logic-k {
+        font-size: 12px;
+        font-weight: 780;
+        color: rgba(234, 243, 255, 0.98);
+        margin-bottom: 5px;
+      }
+      .logic-v {
+        font-size: 12px;
+        color: rgba(234, 243, 255, 0.88);
+        line-height: 1.5;
+        white-space: pre-line;
+      }
+      .records-toolbar {
+        display: flex;
+        align-items: center;
+        justify-content: stretch;
+        margin-bottom: 8px;
+      }
+      .filters {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 8px;
+        width: 100%;
+      }
+      .config {
+        position: relative;
+        overflow: hidden;
+        border: 1px solid var(--panel-line);
+        border-radius: 16px;
+        padding: 12px;
+        background: var(--panel-bg);
+        margin-bottom: 12px;
+        backdrop-filter: blur(7px);
+      }
+      .config-content {
+        position: relative;
+        margin-top: 9px;
+      }
+      .config.is-collapsed .config-content {
+        display: none;
+      }
+      .config-inner {
+        transition: filter 0.2s ease;
+      }
+      .config.is-locked .config-inner {
+        filter: blur(5px);
+        pointer-events: none;
+        user-select: none;
+      }
+      .config-lock {
+        display: none;
+      }
+      .config.is-locked .config-lock {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 14px;
+        background: rgba(4, 10, 22, 0.6);
+        backdrop-filter: blur(2.2px);
+      }
+      .config-lock-box {
+        width: min(360px, 100%);
+        border: 1px solid rgba(180, 206, 255, 0.32);
+        border-radius: 12px;
+        background: rgba(8, 17, 35, 0.92);
+        padding: 12px;
+      }
+      .config-lock-title {
+        font-size: 14px;
+        font-weight: 780;
+        margin-bottom: 4px;
+      }
+      .config-lock-desc {
+        font-size: 12px;
+        color: rgba(234, 243, 255, 0.82);
+        margin-bottom: 9px;
+      }
+      .config-lock-row {
+        display: flex;
+        align-items: stretch;
+        gap: 8px;
+      }
+      .config-lock-row input {
+        flex: 1 1 auto;
+        min-width: 0;
+      }
+      .config-lock-row button {
+        flex: 0 0 124px;
+        width: 124px;
+        min-width: 124px;
+      }
+      .config-lock-status {
+        margin-top: 8px;
+        min-height: 16px;
+        font-size: 12px;
+        color: rgba(255, 189, 206, 0.95);
+      }
+      .config-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        margin-bottom: 0;
+        flex-wrap: wrap;
+      }
+      .config-head-actions {
+        display: inline-flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 8px;
+        margin-left: auto;
+        flex-wrap: wrap;
+      }
+      .config-title {
+        font-size: 14px;
+        font-weight: 780;
+      }
+      .run-toggle-btn {
+        width: auto;
+        min-width: 132px;
+        height: 34px;
+        padding: 0 12px;
+        font-size: 12px;
+      }
+      .run-toggle-btn.running {
+        border-color: rgba(122, 245, 198, 0.45);
+        background: rgba(122, 245, 198, 0.2);
+        color: #d8fff1;
+      }
+      .run-toggle-btn.blocked {
+        border-color: rgba(255, 154, 176, 0.45);
+        background: rgba(255, 154, 176, 0.16);
+        color: #ffd6e1;
+      }
+      .config-head .collapse-btn {
+        width: auto;
+        min-width: 84px;
+        height: 34px;
+        padding: 0 10px;
+        font-size: 12px;
+      }
+      .config-note {
+        font-size: 12px;
+        color: var(--muted);
+        margin-bottom: 10px;
+      }
+      .cfg-run-hint {
+        margin-top: 6px;
+        min-height: 16px;
+        font-size: 12px;
+        color: rgba(255, 206, 168, 0.95);
+      }
+      .cfg-field {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .cfg-label {
+        font-size: 12px;
+        font-weight: 760;
+        color: rgba(234, 243, 255, 0.84);
+      }
+      .cfg-grid {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 9px;
+      }
+      .cfg-grid.dual {
+        grid-template-columns: 1fr;
+      }
+      .symbol-chips {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+      }
+      .symbol-chip {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        justify-content: center;
+        gap: 2px;
+        min-height: 46px;
+        height: auto;
+        padding: 7px 10px;
+        border-radius: 10px;
+        border: 1px solid rgba(173, 213, 255, 0.3);
+        background: rgba(14, 27, 48, 0.82);
+        text-align: left;
+      }
+      .symbol-chip span {
+        font-size: 12px;
+        font-weight: 760;
+      }
+      .symbol-chip em {
+        font-size: 11px;
+        font-style: normal;
+        color: rgba(234, 243, 255, 0.72);
+      }
+      .symbol-chip.active {
+        border-color: rgba(122, 245, 198, 0.52);
+        background: rgba(122, 245, 198, 0.14);
+        color: #d8fff1;
+      }
+      .cfg-readonly {
+        width: 100%;
+        min-height: 42px;
+        display: flex;
+        align-items: center;
+        border-radius: 11px;
+        border: 1px solid rgba(173, 213, 255, 0.32);
+        background: rgba(16, 28, 50, 0.5);
+        color: rgba(234, 243, 255, 0.9);
+        padding: 0 12px;
+        font-size: 13px;
+      }
+      .cfg-subhead {
+        margin-top: 12px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .link-badge {
+        display: inline-flex;
+        align-items: center;
+        border-radius: 999px;
+        border: 1px solid rgba(255, 255, 255, 0.24);
+        padding: 4px 10px;
+        font-size: 11px;
+        font-weight: 800;
+        color: rgba(234, 243, 255, 0.92);
+        background: rgba(255, 255, 255, 0.06);
+      }
+      .link-badge.on {
+        color: #7af5c6;
+        border-color: rgba(122, 245, 198, 0.45);
+        background: rgba(122, 245, 198, 0.12);
+      }
+      .link-badge.pending {
+        color: #ffd68a;
+        border-color: rgba(255, 214, 138, 0.45);
+        background: rgba(255, 214, 138, 0.1);
+      }
+      .bn-actions {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+        width: 100%;
+      }
+      .bn-actions.single {
+        grid-template-columns: 1fr;
+      }
+      .bn-actions button {
+        height: 38px;
+        font-size: 12px;
+        padding: 0 8px;
+      }
+      #bnLinkFormActions .bn-actions {
+        display: flex;
+        justify-content: flex-end;
+      }
+      #bnLinkFormActions .bn-actions button {
+        width: auto;
+        min-width: 180px;
+        max-width: 220px;
+        padding: 0 14px;
+      }
+      #bnLinkForm[hidden],
+      #bnLinkFormActions[hidden],
+      #bnLinkedActions[hidden] {
+        display: none !important;
+      }
+      .cfg-mini {
+        margin-top: 6px;
+        font-size: 12px;
+        color: rgba(234, 243, 255, 0.86);
+        white-space: pre-line;
+        word-break: break-word;
+        line-height: 1.45;
+      }
+      .cfg-mini:empty {
+        display: none;
+        margin-top: 0;
+      }
+      .cfg-actions {
+        margin-top: 9px;
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 8px;
+      }
+      .cfg-save-hint {
+        margin-top: 6px;
+        min-height: 16px;
+        font-size: 12px;
+        color: rgba(255, 206, 168, 0.95);
+      }
+      .cfg-status {
+        margin-top: 8px;
+        min-height: 18px;
+        font-size: 12px;
+        color: rgba(234, 243, 255, 0.92);
+        white-space: pre-line;
+      }
+      .summary {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 9px;
+        margin-bottom: 12px;
+      }
+      .summary-head {
+        margin: 4px 0 7px;
+        font-size: 13px;
+        font-weight: 780;
+        color: rgba(234, 243, 255, 0.94);
+      }
+      .summary-sub {
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        border-radius: 12px;
+        padding: 10px;
+        background: linear-gradient(180deg, rgba(13, 24, 46, 0.9), rgba(8, 15, 31, 0.88));
+        margin: 0 0 12px;
+      }
+      .summary-sub-title {
+        font-size: 12px;
+        font-weight: 760;
+        color: rgba(234, 243, 255, 0.78);
+      }
+      .collateral-cards {
+        margin-top: 8px;
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 8px;
+      }
+      .collateral-card {
+        border: 1px solid rgba(180, 206, 255, 0.2);
+        border-radius: 10px;
+        padding: 8px 10px;
+        background: rgba(9, 18, 36, 0.78);
+      }
+      .collateral-card-k {
+        font-size: 11px;
+        color: rgba(234, 243, 255, 0.72);
+      }
+      .collateral-card-v {
+        margin-top: 4px;
+        font-size: 14px;
+        font-weight: 800;
+        color: rgba(234, 243, 255, 0.96);
+        font-variant-numeric: tabular-nums;
+      }
+      .stat {
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 12px;
+        padding: 10px 10px;
+        background: linear-gradient(180deg, rgba(15, 29, 55, 0.9), rgba(8, 16, 34, 0.88));
+      }
+      .stat-k {
+        font-size: 12px;
+        color: rgba(234, 243, 255, 0.75);
+      }
+      .stat-v {
+        margin-top: 5px;
+        font-size: 18px;
+        font-weight: 800;
+        font-variant-numeric: tabular-nums;
+      }
+      .board {
+        border: 1px solid var(--panel-line);
+        border-radius: 16px;
+        padding: 12px;
+        background: var(--panel-bg);
+        backdrop-filter: blur(7px);
+      }
+      .records-wrap {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        border: 1px solid rgba(180, 206, 255, 0.16);
+        border-radius: 12px;
+        background: rgba(5, 12, 26, 0.35);
+      }
+      .records-table {
+        width: 100%;
+        border-collapse: collapse;
+        min-width: 840px;
+      }
+      .records-table thead th {
+        text-align: left;
+        font-size: 12px;
+        font-weight: 780;
+        color: rgba(234, 243, 255, 0.8);
+        padding: 8px 10px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.14);
+        white-space: nowrap;
+        background: rgba(14, 28, 53, 0.96);
+        position: sticky;
+        top: 0;
+        z-index: 1;
+      }
+      .records-table tbody td {
+        font-size: 12px;
+        color: rgba(234, 243, 255, 0.94);
+        padding: 9px 10px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        vertical-align: middle;
+        white-space: nowrap;
+        word-break: break-word;
+      }
+      .records-table tbody tr:hover {
+        background: rgba(255, 255, 255, 0.03);
+      }
+      .records-num {
+        font-variant-numeric: tabular-nums;
+      }
+      .records-profit {
+        font-weight: 760;
+      }
+      .records-profit.pos {
+        color: #7af5c6;
+      }
+      .records-profit.neg {
+        color: #ff9ab0;
+      }
+      .records-empty {
+        padding: 14px 10px;
+        font-size: 13px;
+        color: rgba(234, 243, 255, 0.8);
+      }
+      .records-empty-row td {
+        text-align: center;
+        color: rgba(234, 243, 255, 0.78);
+        padding: 14px 10px;
+      }
+      .badge {
+        border: 1px solid rgba(255, 255, 255, 0.25);
+        border-radius: 999px;
+        padding: 4px 10px;
+        font-size: 12px;
+        font-weight: 800;
+      }
+      .b-open { color: #ffd68a; border-color: rgba(255, 214, 138, 0.5); }
+      .b-tp { color: #7af5c6; border-color: rgba(122, 245, 198, 0.5); }
+      .b-sl { color: #ff9ab0; border-color: rgba(255, 154, 176, 0.5); }
+      .b-fail { color: #ffb6d1; border-color: rgba(255, 182, 209, 0.5); }
+      .pager {
+        margin-top: 10px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+      }
+      .filters select {
+        width: 100%;
+        height: 36px;
+        padding: 0 10px;
+        border-radius: 9px;
+        font-size: 12px;
+      }
+      #pageLabel {
+        min-width: 74px;
+        text-align: center;
+        font-size: 12px;
+        color: rgba(234, 243, 255, 0.92);
+      }
+      input,
+      select,
+      button {
+        width: 100%;
+        min-width: 0;
+        height: 42px;
+        border-radius: 11px;
+        border: 1px solid rgba(173, 213, 255, 0.32);
+        background: rgba(16, 28, 50, 0.88);
+        color: var(--text);
+        padding: 0 12px;
+        font-size: 13px;
+      }
+      button {
+        font-weight: 760;
+        cursor: pointer;
+        appearance: none;
+        -webkit-appearance: none;
+      }
+      button:disabled,
+      button.is-disabled {
+        opacity: 0.52;
+        filter: saturate(0.6);
+        cursor: not-allowed;
+      }
+      .ghost {
+        background: rgba(78, 230, 255, 0.12);
+        border-color: rgba(78, 230, 255, 0.35);
+        color: rgba(214, 248, 255, 0.95);
+      }
+      .primary {
+        background: rgba(87, 244, 183, 0.2);
+        border-color: rgba(87, 244, 183, 0.45);
+      }
+      .inline-check {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 12px;
+        color: rgba(234, 243, 255, 0.9);
+        white-space: nowrap;
+      }
+      .inline-check input {
+        width: 14px;
+        height: 14px;
+      }
+      @media (min-width: 680px) {
+        .mobile-shell {
+          padding: 14px 16px 22px;
+        }
+        .cfg-grid.dual {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+        .symbol-chips {
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+        }
+        .records-table tbody td {
+          font-size: 13px;
+        }
+      }
+      @media (min-width: 980px) {
+        .mobile-shell {
+          padding: 18px 20px 26px;
+        }
+        .head {
+          margin-bottom: 12px;
+        }
+        .title {
+          font-size: 22px;
+        }
+        .cfg-grid {
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+        }
+        .symbol-chips {
+          grid-template-columns: repeat(4, minmax(0, 1fr));
+        }
+        .summary {
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+        }
+        .records-toolbar {
+          justify-content: flex-end;
+        }
+        .filters {
+          display: flex;
+          width: auto;
+        }
+        .filters select {
+          width: 116px;
+        }
+      }
+      @media (max-width: 760px) {
+        .records-wrap {
+          overflow-x: auto;
+          -webkit-overflow-scrolling: touch;
+          border: 1px solid rgba(180, 206, 255, 0.16);
+          background: rgba(5, 12, 26, 0.35);
+        }
+        .records-table {
+          min-width: 620px;
+        }
+        .records-table thead {
+          display: table-header-group;
+        }
+        .records-table thead th:nth-child(3),
+        .records-table thead th:nth-child(8),
+        .records-table thead th:nth-child(9),
+        .records-table tbody td:nth-child(3),
+        .records-table tbody td:nth-child(8),
+        .records-table tbody td:nth-child(9) {
+          display: none;
+        }
+      }
+      @media (max-width: 640px) {
+        .cfg-actions {
+          grid-template-columns: 1fr;
+        }
+        .filters {
+          grid-template-columns: 1fr;
+        }
+        .config-head-actions {
+          width: 100%;
+          justify-content: space-between;
+        }
+        .run-toggle-btn {
+          min-width: 122px;
+        }
+        .config-head .collapse-btn {
+          min-width: 0;
+        }
+        .config-lock-row {
+          display: grid;
+          grid-template-columns: 1fr;
+        }
+        .config-lock-row button {
+          width: 100%;
+          min-width: 0;
+          flex: 1 1 auto;
+        }
+        .collateral-cards {
+          grid-template-columns: 1fr;
+        }
+        .logic-modal {
+          padding: 10px;
+        }
+        .logic-modal-body {
+          max-height: calc(100vh - 104px);
+          padding: 10px;
+        }
+        .logic-open-btn {
+          min-width: 76px;
+          padding: 0 10px;
+        }
+      }
+      @media (max-width: 420px) {
+        .mobile-shell {
+          padding: 10px 10px 16px;
+        }
+        .symbol-chips {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+        .bn-actions {
+          grid-template-columns: 1fr;
+        }
+        #bnLinkFormActions .bn-actions {
+          display: flex;
+          justify-content: flex-end;
+        }
+        #bnLinkFormActions .bn-actions button {
+          min-width: 156px;
+          max-width: 186px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="mobile-shell">
+    <div class="head">
+      <div class="title">자동매매 센터</div>
+      <div class="head-tools">
+        <button id="logicOpenBtn" class="ghost logic-open-btn" type="button">로직 보기</button>
+      </div>
+    </div>
+    <section class="config is-locked is-collapsed" id="configSection">
+      <div class="config-head">
+        <div class="config-title">자동매매 설정</div>
+        <div class="config-head-actions">
+          <button id="cfgTopRunBtn" class="primary run-toggle-btn" type="button" disabled>지금 실행</button>
+          <button id="cfgCollapseBtn" class="ghost collapse-btn" type="button" aria-expanded="false" aria-controls="configContent">펼치기</button>
+        </div>
+      </div>
+      <div id="cfgTopRunHint" class="cfg-run-hint"></div>
+      <div class="config-content" id="configContent">
+      <div class="config-inner">
+      <div class="cfg-field">
+        <div class="cfg-label">코인 선택</div>
+        <div id="cfgSymbolChips" class="symbol-chips">
+          <button type="button" class="symbol-chip" data-symbol="BTCUSDT"><span>BTCUSDT</span><em>현물</em></button>
+          <button type="button" class="symbol-chip" data-symbol="ETHUSDT"><span>ETHUSDT</span><em>현물</em></button>
+          <button type="button" class="symbol-chip" data-symbol="XRPUSDT"><span>XRPUSDT</span><em>현물</em></button>
+          <button type="button" class="symbol-chip" data-symbol="DOGEUSDT"><span>DOGEUSDT</span><em>현물</em></button>
+          <button type="button" class="symbol-chip" data-symbol="SUIUSDT"><span>SUIUSDT</span><em>현물</em></button>
+          <button type="button" class="symbol-chip" data-symbol="SOLUSDT"><span>SOLUSDT</span><em>현물</em></button>
+          <button type="button" class="symbol-chip" data-symbol="CROSSUSDT"><span>CROSSUSDT</span><em>선물</em></button>
+        </div>
+      </div>
+      <div class="cfg-grid dual" style="margin-top:9px;">
+        <div class="cfg-field">
+          <div class="cfg-label">분석 타임</div>
+          <select id="cfgInterval">
+            <option value="5m">5m</option>
+            <option value="1h">1h</option>
+            <option value="4h">4h</option>
+          </select>
+        </div>
+        <div class="cfg-field">
+          <div class="cfg-label">투자모드</div>
+          <select id="cfgMode">
+            <option value="balanced">기본모드</option>
+            <option value="aggressive">공격모드</option>
+          </select>
+        </div>
+      </div>
+      <div class="cfg-grid dual" style="margin-top:9px;">
+        <div class="cfg-field">
+          <div class="cfg-label">1회 거래금액 (USDT)</div>
+          <input id="cfgOrderSize" type="number" min="10" step="1" placeholder="예: 30" />
+        </div>
+        <div class="cfg-field">
+          <div class="cfg-label">일 최대 손실 (USDT)</div>
+          <input id="cfgDailyLoss" type="number" min="1" step="1" placeholder="예: 50" />
+        </div>
+      </div>
+      <div class="cfg-field" style="margin-top:9px;">
+        <div class="cfg-label">동시 최대 포지션</div>
+        <input id="cfgMaxOpen" type="number" min="1" max="5" step="1" placeholder="1~5" />
+      </div>
+      <div class="cfg-grid dual" style="margin-top:9px;">
+        <div class="cfg-field">
+          <div class="cfg-label">익절 TP 처리</div>
+          <select id="cfgTpMode">
+            <option value="auto">자동 (피보나치)</option>
+            <option value="manual">직접입력 (%)</option>
+          </select>
+        </div>
+        <div class="cfg-field">
+          <div class="cfg-label">익절 TP (%)</div>
+          <input id="cfgTpPct" type="number" min="0.1" step="0.1" placeholder="예: 1.8" />
+        </div>
+      </div>
+      <div class="cfg-grid dual" style="margin-top:9px;">
+        <div class="cfg-field">
+          <div class="cfg-label">손절 SL 처리</div>
+          <select id="cfgSlMode">
+            <option value="auto">자동 (피보나치)</option>
+            <option value="manual">직접입력 (%)</option>
+          </select>
+        </div>
+        <div class="cfg-field">
+          <div class="cfg-label">손절 SL (%)</div>
+          <input id="cfgSlPct" type="number" min="0.1" step="0.1" placeholder="예: 0.7" />
+        </div>
+      </div>
+      <div class="cfg-subhead">
+        <div class="config-title">바이낸스 API 연동</div>
+        <span id="bnLinkBadge" class="link-badge">미연동</span>
+      </div>
+      <div id="bnLinkForm" class="cfg-grid dual" style="margin-top:8px;">
+        <div class="cfg-field">
+          <div class="cfg-label">Binance API Key</div>
+          <input id="bnApiKey" type="text" autocomplete="off" placeholder="API Key 입력" />
+        </div>
+        <div class="cfg-field">
+          <div class="cfg-label">Binance API Secret</div>
+          <input id="bnApiSecret" type="password" autocomplete="off" placeholder="API Secret 입력" />
+        </div>
+      </div>
+      <div id="bnLinkFormActions" style="margin-top:8px;">
+        <div class="bn-actions">
+          <button id="bnLinkBtn" class="primary" type="button">스팟+선물 동시 연동</button>
+        </div>
+      </div>
+      <div id="bnLinkedActions" style="margin-top:8px;" hidden>
+        <div class="bn-actions single">
+          <button id="bnUnlinkBtn" class="ghost" type="button">연동 해제</button>
+        </div>
+      </div>
+      <div id="bnLinkedInfo" class="cfg-mini"></div>
+      <div id="bnLinkStatus" class="cfg-mini"></div>
+      <input id="cfgSymbol" type="hidden" value="BTCUSDT" />
+      <input id="cfgMarket" type="hidden" value="spot" />
+      <input id="cfgEnabled" type="checkbox" hidden />
+      <input id="cfgCooldownMin" type="hidden" value="0" />
+      <div class="cfg-actions">
+        <button id="cfgSaveBtn">설정 저장</button>
+      </div>
+      <div id="cfgSaveHint" class="cfg-save-hint"></div>
+      <div id="cfgStatus" class="cfg-status"></div>
+      </div>
+      <div class="config-lock" id="configLock">
+        <div class="config-lock-box">
+          <div class="config-lock-title">설정 잠금</div>
+          <div class="config-lock-desc">비밀번호 입력 후 자동매매 설정을 변경할 수 있습니다.</div>
+          <div class="config-lock-row">
+            <input id="cfgUnlockInput" type="password" autocomplete="off" placeholder="비밀번호 입력" />
+            <button id="cfgUnlockBtn" class="primary" type="button">해제</button>
+          </div>
+          <div id="cfgLockStatus" class="config-lock-status"></div>
+        </div>
+      </div>
+      </div>
+    </section>
+    <div class="summary-head">거래 통계</div>
+    <div id="summary" class="summary">
+      <div class="stat"><div class="stat-k">총 거래</div><div class="stat-v">-</div></div>
+      <div class="stat"><div class="stat-k">손익금액</div><div class="stat-v">-</div></div>
+      <div class="stat"><div class="stat-k">손익%</div><div class="stat-v">-</div></div>
+    </div>
+    <div class="summary-sub">
+      <div class="summary-sub-title">거래통계 담보금 (USDT)</div>
+      <div class="collateral-cards">
+        <div class="collateral-card">
+          <div class="collateral-card-k">담보금 합계</div>
+          <div id="bnCollateralTotal" class="collateral-card-v">-</div>
+        </div>
+        <div class="collateral-card">
+          <div class="collateral-card-k">Spot 합계 (코인)</div>
+          <div id="bnCollateralSpot" class="collateral-card-v">-</div>
+        </div>
+        <div class="collateral-card">
+          <div class="collateral-card-k">Futures 합계</div>
+          <div id="bnCollateralFutures" class="collateral-card-v">-</div>
+        </div>
+      </div>
+    </div>
+    <div class="board">
+      <div class="records-toolbar">
+        <div class="filters">
+          <select id="filterSymbol"></select>
+          <select id="filterMode"></select>
+          <select id="filterStatus"></select>
+        </div>
+      </div>
+      <div class="records-wrap">
+        <table class="records-table">
+          <thead>
+            <tr>
+              <th>상태</th>
+              <th>코인</th>
+              <th>매매모드</th>
+              <th>거래시드</th>
+              <th>진입가</th>
+              <th>익절/손절가</th>
+              <th>수익</th>
+              <th>구매일시</th>
+              <th>판매일시</th>
+            </tr>
+          </thead>
+          <tbody id="recordsBody"></tbody>
+        </table>
+      </div>
+      <div class="records-empty" id="emptyState" hidden>표시할 기록이 없습니다.</div>
+      <div class="pager">
+        <button id="prevBtn">이전</button>
+        <div id="pageLabel">1 페이지</div>
+        <button id="nextBtn">다음</button>
+      </div>
+    </div>
+    </div>
+    <div class="logic-modal" id="logicModal" hidden>
+      <div class="logic-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="logicModalTitle">
+        <div class="logic-modal-head">
+          <div class="logic-modal-title" id="logicModalTitle">현재 자동매매 로직 요약</div>
+          <button id="logicModalCloseBtn" class="ghost logic-modal-close" type="button">닫기</button>
+        </div>
+        <div class="logic-modal-body">
+          <div class="logic-block">
+            <div class="logic-k">공통 진입 전 체크</div>
+            <div class="logic-v">1) 바이낸스 연동 + 설정 저장 + 실행 상태여야 합니다.
+2) 동시 최대 포지션 수 도달 시 신규 진입을 건너뜁니다.
+3) 당일 실현손익이 일 최대 손실 한도 이하이면 신규 진입을 중단합니다.
+4) 선택 마켓 가용 담보가 1회 거래금액보다 부족하면 신규 진입을 중단합니다.</div>
+          </div>
+          <div class="logic-block">
+            <div class="logic-k">매수/매도 진입 조건</div>
+            <div class="logic-v">기본모드: 확률 PASS(pass_prob + pass_regime)일 때만 방향을 채택합니다.
+공격모드: PASS 여부와 관계없이 매수/매도 확률 중 우세값이 60% 이상일 때 진입 후보가 됩니다.
+공격모드 추가 제한: 피보 스윙 방향과 시그널 방향이 다르면 미진입합니다.
+스팟 마켓은 숏(SELL 진입)을 허용하지 않습니다.</div>
+          </div>
+          <div class="logic-block">
+            <div class="logic-k">피보나치 기반 체결</div>
+            <div class="logic-v">1) 진입: 계산된 피보 진입가를 현재 봉 고저/종가 기준으로 터치하면 체결 처리합니다.
+2) 손절: 자동 모드면 피보 손절가, 수동 모드면 입력 % 기준 손절가를 사용합니다.
+3) 익절: 자동 모드면 피보 TP1/TP2, 수동 모드면 입력 %를 TP1=TP2로 사용합니다.</div>
+          </div>
+          <div class="logic-block">
+            <div class="logic-k">청산 규칙</div>
+            <div class="logic-v">1) TP1 도달 시 50% 부분익절, TP2 도달 시 잔량 청산.
+2) 동일 봉에서 손절/익절이 함께 터치되면 보수적으로 손절 우선 처리.
+3) 진입 후 2일(48시간) 내 TP/SL 미도달이면 시간종료(CLOSED_FAIL)로 정리합니다.</div>
+          </div>
+          <div class="logic-block">
+            <div class="logic-k">실거래 보호 처리</div>
+            <div class="logic-v">1) 진입 체결 후 거래소 보호손절 주문을 생성합니다.
+2) 보호주문 실패 시 즉시 반대 시장가 청산을 시도하고 자동매매를 비활성화합니다.
+3) 부분청산 후 남은 수량 기준으로 보호손절 주문을 재생성합니다.</div>
+          </div>
+          <div class="logic-block">
+            <div class="logic-k">운영 참고</div>
+            <div class="logic-v">백그라운드 tick 주기 기본값은 15초이며, 일손실 기준은 KST 일자 기준(실현손익만)으로 집계됩니다.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <script src="/static/auto_trades_popup.js?v=20260220ao"></script>
+  </body>
+</html>

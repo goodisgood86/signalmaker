@@ -53,10 +53,26 @@ body {
   margin-bottom: 14px;
 }
 
+.header-left {
+  min-width: 0;
+}
+
+.title-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .title {
   font-size: 24px;
   font-weight: 800;
   letter-spacing: -0.015em;
+}
+
+.header-auto-btn {
+  height: 30px;
+  padding: 0 10px;
+  font-size: 12px;
 }
 
 .header-note {
@@ -427,6 +443,14 @@ body {
   min-width: 132px;
 }
 
+.auto-actions {
+  gap: 7px;
+}
+
+.auto-actions .sim-btn {
+  min-width: 110px;
+}
+
 .sim-entry-wrap {
   display: flex;
   align-items: center;
@@ -670,6 +694,14 @@ body {
 .sim-item .badge.fail {
   color: #ffb6d1;
   border-color: rgba(255, 182, 209, 0.5);
+}
+
+.auto-list .sim-item {
+  padding: 9px 10px;
+}
+
+.auto-list .sim-time {
+  white-space: pre-line;
 }
 
 .section-head {
@@ -1465,7 +1497,9 @@ label.chk input[type="checkbox"] {
 .tip:hover::after,
 .tip:hover::before,
 .tip:focus::after,
-.tip:focus::before {
+.tip:focus::before,
+.tip:active::after,
+.tip:active::before {
   opacity: 1;
   visibility: visible;
 }
@@ -1714,8 +1748,23 @@ label.chk input[type="checkbox"] {
   }
 
   .tip::after {
-    min-width: 220px;
-    max-width: min(88vw, 320px);
+    position: fixed;
+    left: 50%;
+    right: auto;
+    bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+    transform: translateX(-50%);
+    min-width: 0;
+    width: min(92vw, 360px);
+    max-width: 92vw;
+    max-height: 46vh;
+    overflow-y: auto;
+    padding: 10px 11px;
+    border-radius: 10px;
+    line-height: 1.45;
+  }
+
+  .tip::before {
+    display: none;
   }
 
   .news-list {

@@ -2,6 +2,7 @@ const analysisIntervalEl = document.getElementById("analysisInterval");
 const chartIntervalEl = document.getElementById("chartInterval");
 const analysisModeEl = document.getElementById("analysisMode");
 const refreshEl = document.getElementById("refresh");
+const headerAutoBtnEl = document.getElementById("headerAutoBtn");
 const fibToggleEl = document.getElementById("fibToggle");
 const avwapToggleEl = document.getElementById("avwapToggle");
 const vpToggleEl = document.getElementById("vpToggle");
@@ -23,8 +24,23 @@ const simRuleNoteEl = document.getElementById("simRuleNote");
 const simStatusEl = document.getElementById("simStatus");
 const simListEl = document.getElementById("simList");
 const simOpenAllBtnEl = document.getElementById("simOpenAllBtn");
+const autoEnabledEl = document.getElementById("autoEnabled");
+const autoModeEl = document.getElementById("autoMode");
+const autoIntervalEl = document.getElementById("autoInterval");
+const autoOrderSizeEl = document.getElementById("autoOrderSize");
+const autoDailyLossEl = document.getElementById("autoDailyLoss");
+const autoTpPctEl = document.getElementById("autoTpPct");
+const autoSlPctEl = document.getElementById("autoSlPct");
+const autoCooldownMinEl = document.getElementById("autoCooldownMin");
+const autoMaxOpenEl = document.getElementById("autoMaxOpen");
+const autoSaveBtnEl = document.getElementById("autoSaveBtn");
+const autoRunBtnEl = document.getElementById("autoRunBtn");
+const autoOpenAllBtnEl = document.getElementById("autoOpenAllBtn");
+const autoStatusEl = document.getElementById("autoStatus");
+const autoListEl = document.getElementById("autoList");
 let toastWrapEl = null;
 const SIM_TRADES_CACHE_KEY = "sim_trades_cache_v1";
+const AUTO_TRADES_CACHE_KEY = "auto_trades_cache_v1";
 let latestVolumeStates = {};
 let latestDecisionKlines = [];
 
@@ -416,6 +432,7 @@ let priceRefreshTimer = null;
 let mainRefreshTimer = null;
 let newsRefreshTimer = null;
 let simRefreshTimer = null;
+let autoRefreshTimer = null;
 let fxRefreshTimer = null;
 let spotListWs = null;
 let futuresListWs = null;
@@ -448,11 +465,14 @@ let activeLoadSeq = 0;
 let activePassCheckController = null;
 let activePassCheckSeq = 0;
 let passCheckTimer = null;
+let autoTickBusy = false;
+let autoConfigReady = false;
 
 const PRICE_REFRESH_MS = 20000; // websocket 장애 대비 fallback
 const FX_REFRESH_MS = 60000;
 const NEWS_REFRESH_MS = 300000;
 const SIM_REFRESH_MS = 20000;
+const AUTO_REFRESH_MS = 25000;
 
 const COINS = [
   { name: "비트코인", symbol: "BTCUSDT", market: "spot", mark: "₿" },
@@ -715,6 +735,229 @@ async function simAddTrade() {
     await loadSimTrades();
   } catch (e) {
     setSimStatus(`기록 추가 실패: ${e.message || e}`);
+  }
+}
+
+function setAutoStatus(msg) {
+  if (autoStatusEl) autoStatusEl.textContent = msg || "";
+}
+
+function autoFibPlanStatusText(plan) {
+  if (!plan || typeof plan !== "object") return "";
+  const entry = formatPrice(Number(plan?.entry_price));
+  const stop = formatPrice(Number(plan?.stop_price));
+  const tp1 = formatPrice(Number(plan?.tp1_price));
+  const tp2 = formatPrice(Number(plan?.tp2_price));
+  if ([entry, stop, tp1, tp2].some((v) => v === "-")) return "";
+  return `피보 진입 ${entry} / 손절 ${stop} / 익절 ${tp1}~${tp2}`;
+}
+
+function setAutoTickStatus(data) {
+  const action = String(data?.action || "");
+  const reason = String(data?.reason || "");
+  const planText = autoFibPlanStatusText(data?.plan);
+  if (action === "OPENED") {
+    setAutoStatus("자동매매 진입 실행됨");
+    return;
+  }
+  if (action === "NO_SIGNAL") {
+    const base = reason === "BASIC_PASS_FAIL" ? "자동매매 대기: 확률 미PASS" : "자동매매 대기: 진입 신호 없음";
+    setAutoStatus(planText ? `${base} | ${planText}` : base);
+    return;
+  }
+  if (action === "WAIT_FIB_ENTRY") {
+    const base = "자동매매 대기: 피보나치 진입가 대기";
+    setAutoStatus(planText ? `${base} | ${planText}` : base);
+    return;
+  }
+  if (action === "SKIP_DAILY_LOSS_LIMIT") {
+    setAutoStatus("자동매매 중지: 일일 손실 한도 도달");
+    return;
+  }
+  if (action === "SKIP_OPEN_LIMIT") {
+    setAutoStatus("자동매매 대기: 최대 포지션 수 도달");
+    return;
+  }
+  if (action === "SKIP_COOLDOWN") {
+    setAutoStatus("자동매매 대기: 재진입 쿨다운");
+    return;
+  }
+  if (action === "SKIP_COLLATERAL_LOW") {
+    setAutoStatus("자동매매 중지: 담보금 부족");
+    return;
+  }
+  if (action === "SKIP_COLLATERAL_ERROR") {
+    setAutoStatus("자동매매 대기: 담보금 조회 실패");
+    return;
+  }
+  if (action === "ORDER_REJECTED") {
+    setAutoStatus(`실주문 실패: ${String(data?.detail || "주문 거부")}`);
+    return;
+  }
+  if (action === "DISABLED") {
+    setAutoStatus("자동매매 비활성화 상태");
+    return;
+  }
+  setAutoStatus("");
+}
+
+function autoStatusMeta(status) {
+  const st = String(status || "").toUpperCase();
+  if (st === "TP") return { cls: "tp", text: "익절" };
+  if (st === "SL") return { cls: "sl", text: "손절" };
+  if (st === "CLOSED_FAIL") return { cls: "fail", text: "시간종료" };
+  return { cls: "open", text: "보유중" };
+}
+
+function fmtSigned(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return "-";
+  return `${n >= 0 ? "+" : ""}${n.toFixed(2)}`;
+}
+
+function loadCachedAutoTrades() {
+  try {
+    const raw = localStorage.getItem(AUTO_TRADES_CACHE_KEY);
+    if (!raw) return [];
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? arr : [];
+  } catch (_) {
+    return [];
+  }
+}
+
+function saveCachedAutoTrades(rows) {
+  try {
+    const arr = Array.isArray(rows) ? rows : [];
+    localStorage.setItem(AUTO_TRADES_CACHE_KEY, JSON.stringify(arr.slice(0, 10)));
+  } catch (_) {}
+}
+
+function renderAutoTrades(records) {
+  if (!autoListEl) return;
+  const rows = Array.isArray(records) ? records : [];
+  if (!rows.length) {
+    autoListEl.innerHTML = `<div class="sim-item sim-empty">자동매매 기록이 없습니다.</div>`;
+    scheduleSidebarPinUpdate();
+    return;
+  }
+  autoListEl.innerHTML = rows
+    .map((r) => {
+      const meta = autoStatusMeta(r?.status);
+      const pnlTxt =
+        String(r?.status || "").toUpperCase() === "OPEN"
+          ? "미실현"
+          : `${fmtSigned(Number(r?.pnl_usdt || 0))} USDT`;
+      const signalTxt = `신호 B ${Number(r?.signal_buy_pct || 0).toFixed(1)} / S ${Number(r?.signal_sell_pct || 0).toFixed(
+        1
+      )} / C ${(Number(r?.signal_confidence || 0) * 100).toFixed(1)}%`;
+      return `<div class="sim-item">
+        <div class="sim-item-head">
+          <div class="sim-symbol">${r.symbol} · ${String(r.mode || "balanced") === "aggressive" ? "공격" : "기본"}</div>
+          <span class="badge ${meta.cls}">${meta.text}</span>
+        </div>
+        <div class="sim-prices">
+          <div class="sim-price"><span>진입</span><strong>${formatPrice(Number(r.entry_price))}</strong></div>
+          <div class="sim-price"><span>익절</span><strong>${formatPrice(Number(r.take_profit_price))}</strong></div>
+          <div class="sim-price"><span>손절</span><strong>${formatPrice(Number(r.stop_loss_price))}</strong></div>
+        </div>
+        <div class="sim-time">등록 ${fmtSimTs(r.opened_ms)} · 결과 ${pnlTxt}\n${signalTxt}</div>
+      </div>`;
+    })
+    .join("");
+  scheduleSidebarPinUpdate();
+}
+
+function applyAutoConfig(cfg) {
+  if (!cfg || typeof cfg !== "object") return;
+  if (autoEnabledEl) autoEnabledEl.checked = Boolean(cfg.enabled);
+  if (autoModeEl) autoModeEl.value = String(cfg.mode || "balanced");
+  if (autoIntervalEl) autoIntervalEl.value = String(cfg.interval || "5m");
+  if (autoOrderSizeEl) autoOrderSizeEl.value = String(Number(cfg.order_size_usdt || 0));
+  if (autoDailyLossEl) autoDailyLossEl.value = String(Number(cfg.daily_max_loss_usdt || 0));
+  if (autoTpPctEl) autoTpPctEl.value = String(Number(cfg.take_profit_pct || 0));
+  if (autoSlPctEl) autoSlPctEl.value = String(Number(cfg.stop_loss_pct || 0));
+  if (autoCooldownMinEl) autoCooldownMinEl.value = String(Number(cfg.cooldown_min || 0));
+  if (autoMaxOpenEl) autoMaxOpenEl.value = String(Number(cfg.max_open_positions || 1));
+}
+
+function collectAutoConfigPayload() {
+  return {
+    enabled: Boolean(autoEnabledEl?.checked),
+    mode: String(autoModeEl?.value || "balanced"),
+    symbol: selectedSymbol,
+    market: selectedMarket,
+    interval: String(autoIntervalEl?.value || "5m"),
+    order_size_usdt: Number(autoOrderSizeEl?.value || 0),
+    daily_max_loss_usdt: Number(autoDailyLossEl?.value || 0),
+    take_profit_pct: Number(autoTpPctEl?.value || 0),
+    stop_loss_pct: Number(autoSlPctEl?.value || 0),
+    cooldown_min: Number(autoCooldownMinEl?.value || 0),
+    max_open_positions: Number(autoMaxOpenEl?.value || 1),
+  };
+}
+
+async function loadAutoConfig() {
+  if (!autoEnabledEl) return;
+  try {
+    const data = await fetchJSON("/api/auto_trade/config");
+    const cfg = data?.config || {};
+    applyAutoConfig(cfg);
+    autoConfigReady = true;
+    setAutoStatus("");
+  } catch (e) {
+    autoConfigReady = false;
+    setAutoStatus(`자동매매 설정 조회 실패: ${e.message || e}`);
+  }
+}
+
+async function saveAutoConfig() {
+  if (!autoEnabledEl) return;
+  const payload = collectAutoConfigPayload();
+  try {
+    const data = await fetchJSON("/api/auto_trade/config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const cfg = data?.config || payload;
+    applyAutoConfig(cfg);
+    autoConfigReady = true;
+    setAutoStatus("자동매매 설정이 저장되었습니다.");
+  } catch (e) {
+    setAutoStatus(`설정 저장 실패: ${e.message || e}`);
+  }
+}
+
+async function loadAutoTrades() {
+  if (!autoListEl) return;
+  try {
+    const data = await fetchJSON("/api/auto_trade/records?limit=10&page=1&sync=0");
+    const rows = data?.records || [];
+    renderAutoTrades(rows);
+    saveCachedAutoTrades(rows);
+  } catch (e) {
+    setAutoStatus(`자동매매 기록 조회 실패: ${e.message || e}`);
+  }
+}
+
+async function runAutoTradeTick(force = false, silent = false) {
+  if (!autoEnabledEl || autoTickBusy) return;
+  autoTickBusy = true;
+  try {
+    const data = await fetchJSON("/api/auto_trade/tick", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ force: Boolean(force) }),
+    });
+    if (!silent) {
+      setAutoTickStatus(data);
+    }
+    await loadAutoTrades();
+  } catch (e) {
+    if (!silent) setAutoStatus(`자동매매 실행 실패: ${e.message || e}`);
+  } finally {
+    autoTickBusy = false;
   }
 }
 
@@ -1802,18 +2045,42 @@ function renderActionSummary(analysis, fibPlan) {
       if (entryTableScenarioEl) entryTableScenarioEl.textContent = "현물 비중축소 후 재진입 조건을 확인하는 시나리오";
     } else {
       if (fibPlan.isUpMove) {
-        entryTxt = fmtZoneSorted(p05, p0618);
+        entryLo = Math.min(p05, p0618);
+        entryHi = Math.max(p05, p0618);
+        const stopFloor = entryLo * (1 - stopGapPct);
+        const stop = Number.isFinite(p0786) ? Math.min(p0786, stopFloor) : stopFloor;
+        const tp1 = normalizeTpZone(entryHi, p0236, p0382, tp1GapPct);
+        const tp2 = normalizeTpZone(entryHi, p0, p0236, tp2GapPct);
+        targetLo = tp1.lo;
+        targetHi = tp1.hi;
+        target2Lo = tp2.lo;
+        target2Hi = tp2.hi;
+        stopPx = stop;
+        entryTxt = fmtZoneSorted(entryLo, entryHi);
+        targetTxt = buildTpText(tp1.lo, tp1.hi, tp2.lo, tp2.hi);
+        stopTxt = fmtOne(stop);
         fibMeaning = `${swingTxt} 관망(되돌림 반응 확인 단계)`;
         fibZonesTxt = fmtFibZones(fmtZoneSorted(p05, p0618), fmtZoneSorted(p0, p0236));
-        if (entryTableScenarioEl) entryTableScenarioEl.textContent = "상승 추세 유지 여부를 확인하는 관망 시나리오";
+        if (entryTableScenarioEl) entryTableScenarioEl.textContent = "상승 추세 유지 여부를 확인하는 관망 시나리오 (진입/익절/손절 참고값 표시)";
       } else {
-        entryTxt = fmtZoneSorted(p0, p0236);
+        entryLo = Math.min(p0, p0236);
+        entryHi = Math.max(p0, p0236);
+        const stopFloor = entryLo * (1 - stopGapPct);
+        const stop = Number.isFinite(p0) ? Math.min(p0 * 0.997, stopFloor) : stopFloor;
+        const tp1 = normalizeTpZone(entryHi, p0236, p0382, tp1GapPct);
+        const tp2 = normalizeTpZone(entryHi, p0382, p05, tp2GapPct);
+        targetLo = tp1.lo;
+        targetHi = tp1.hi;
+        target2Lo = tp2.lo;
+        target2Hi = tp2.hi;
+        stopPx = stop;
+        entryTxt = fmtZoneSorted(entryLo, entryHi);
+        targetTxt = buildTpText(tp1.lo, tp1.hi, tp2.lo, tp2.hi);
+        stopTxt = fmtOne(stop);
         fibMeaning = `${swingTxt} 관망(저점권 반등 신호 확인 단계)`;
         fibZonesTxt = fmtFibZones(fmtZoneSorted(p0, p0236), fmtZoneSorted(p0236, p0382));
-        if (entryTableScenarioEl) entryTableScenarioEl.textContent = "하락 추세에서 반등 신호 확인 전까지 관망하는 시나리오";
+        if (entryTableScenarioEl) entryTableScenarioEl.textContent = "하락 추세에서 반등 신호 확인 전까지 관망하는 시나리오 (진입/익절/손절 참고값 표시)";
       }
-      targetTxt = "-";
-      stopTxt = "-";
       readGuide = "읽는 법: 관망은 구간 확인 단계이며, 확률/신뢰도 재확인 후 진입합니다.";
     }
   }
@@ -2086,9 +2353,13 @@ function connectAnalysisStream() {
       renderAnalysisOnly(analysis, mode, selectedMarket);
     } catch (_) {}
   };
-  ws.onclose = () => {
+  ws.onclose = (ev) => {
     if (analysisWs !== ws) return;
     analysisWs = null;
+    if (Number(ev?.code) === 4401) {
+      window.location.href = "/static/auth.html";
+      return;
+    }
     if (document.hidden) return;
     analysisWsReconnectTimer = setTimeout(() => connectAnalysisStream(), 2000);
   };
@@ -2465,6 +2736,10 @@ function applyFibOverlay() {
 
 async function fetchJSON(url, options = {}) {
   const res = await fetch(url, options);
+  if (res.status === 401) {
+    window.location.href = "/static/auth.html";
+    throw new Error("401 unauthorized");
+  }
   if (!res.ok) {
     const txt = await res.text();
     throw new Error(`${res.status} ${txt}`);
@@ -2758,6 +3033,25 @@ function startAutoRefresh() {
 refreshEl.addEventListener("click", () =>
   Promise.all([loadCoinPrices(), load({ forceAnalysis: true }), loadSimTrades()]).catch((e) => alert(e.message))
 );
+if (headerAutoBtnEl)
+  headerAutoBtnEl.addEventListener("click", () => {
+    const t = Date.now();
+    const screenW = Number(window.screen?.availWidth || window.innerWidth || 1280);
+    const screenH = Number(window.screen?.availHeight || window.innerHeight || 900);
+    const popupW = Math.max(520, Math.min(760, screenW - 40));
+    const popupH = Math.max(560, Math.min(860, screenH - 70));
+    const left = Math.max(0, Math.floor((screenW - popupW) / 2));
+    const top = Math.max(0, Math.floor((screenH - popupH) / 2));
+    const features = `width=${popupW},height=${popupH},left=${left},top=${top},resizable=yes,scrollbars=yes`;
+    const pop = window.open(`/static/auto_trades_popup.html?t=${t}`, "auto_trades_popup", features);
+    if (pop && !pop.closed) {
+      try {
+        pop.resizeTo(popupW, popupH);
+        pop.moveTo(left, top);
+        pop.focus();
+      } catch (_) {}
+    }
+  });
 if (analysisIntervalEl)
   analysisIntervalEl.addEventListener("change", () => {
     if (analysisIntervalEl.value) lastSingleAnalysisInterval = analysisIntervalEl.value;
