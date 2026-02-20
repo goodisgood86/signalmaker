@@ -225,13 +225,21 @@ body {
 @media (hover: hover) and (pointer: fine) {
   .coin-item:hover {
     border-color: rgba(78, 230, 255, 0.52);
-    background: rgba(78, 230, 255, 0.08);
+    background: rgba(255, 255, 255, 0.03);
   }
 }
 
 .coin-item.active {
   border-color: rgba(78, 230, 255, 0.78);
   background: rgba(78, 230, 255, 0.16);
+}
+
+.coin-item:active,
+.coin-item:not(.active):focus,
+.coin-item:not(.active):focus-visible {
+  border-color: var(--line);
+  background: rgba(255, 255, 255, 0.03);
+  outline: none;
 }
 
 @media (hover: none) and (pointer: coarse) {
@@ -1482,22 +1490,6 @@ label.chk input[type="checkbox"] {
   .wrap {
     max-width: 100%;
     padding: 12px;
-  }
-
-  .coin-side-sticky {
-    position: static !important;
-    top: auto;
-    height: auto;
-    left: auto;
-    width: auto;
-    transform: none;
-    z-index: auto;
-  }
-
-  .coin-side {
-    max-height: none;
-    overflow: visible;
-    scrollbar-gutter: auto;
   }
 
   .main {
