@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import gc
 import hashlib
 import math
 import os
@@ -153,6 +154,24 @@ def _set_bounded_cache(cache_obj: Dict[str, Any], key: str, value: Any, *, max_e
         return
     for old_k in list(cache_obj.keys())[:overflow]:
         cache_obj.pop(old_k, None)
+
+
+def _try_malloc_trim() -> None:
+    # Linux/glibc 환경에서만 동작. 실패해도 무시.
+    try:
+        import ctypes
+
+        libc = ctypes.CDLL("libc.so.6")
+        trim_fn = getattr(libc, "malloc_trim", None)
+        if callable(trim_fn):
+            trim_fn(0)
+    except Exception:
+        return
+
+
+def _compact_runtime_memory() -> None:
+    gc.collect()
+    _try_malloc_trim()
 
 
 def _pc_window_start_ms(days: int = 90) -> int:
@@ -1904,7 +1923,7 @@ async def api_pass_check_batch(
     periods = [str(p) for p in periods if str(p) in {"24h", "3d", "7d"}]
     if not periods:
         periods = ["24h", "3d", "7d"]
-    seed_days = int(payload.get("seed_days", 365) or 365)
+    seed_days = int(payload.get("seed_days", 90) or 90)
     seed_days = max(30, min(seed_days, 3660))
     bootstrap_year = bool(payload.get("bootstrap_year", True))
     bootstrap_signal_step = int(payload.get("bootstrap_signal_step", 12) or 12)
@@ -1959,6 +1978,7 @@ async def api_pass_check_batch(
                         "error": f"symbol_init_failed:{type(e).__name__}",
                     }
                 )
+            _compact_runtime_memory()
             continue
         df = _klines_to_df(klines)
 
@@ -2070,6 +2090,11 @@ async def api_pass_check_batch(
                     }
                 )
                 continue
+        # 심볼 단위 계산 완료 시 큰 객체 해제 후 메모리 반환 시도
+        del klines
+        del df
+        _compact_runtime_memory()
+    _compact_runtime_memory()
     return {"ok": True, "updated": updated}
 
 

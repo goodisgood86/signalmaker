@@ -65,7 +65,7 @@ def main() -> int:
     p.add_argument("--spot-symbols", default="BTCUSDT,ETHUSDT,XRPUSDT,DOGEUSDT,SUIUSDT,SOLUSDT", help="comma-separated")
     p.add_argument("--futures-symbols", default="CROSSUSDT", help="comma-separated")
     p.add_argument("--sleep-ms", type=int, default=250, help="sleep between requests")
-    p.add_argument("--seed-days", type=int, default=365, help="initial seed lookback days when progress is empty")
+    p.add_argument("--seed-days", type=int, default=90, help="initial seed lookback days when progress is empty")
     p.add_argument("--bootstrap-year", action="store_true", help="enable bootstrap mode for first run")
     p.add_argument("--bootstrap-signal-step", type=int, default=12, help="signal step in bootstrap mode")
     args = p.parse_args()
