@@ -773,15 +773,20 @@
         .summary-refresh-btn {
           min-width: 74px;
         }
+        .config-head {
+          flex-wrap: nowrap;
+        }
         .config-head-actions {
-          width: 100%;
-          justify-content: space-between;
+          width: auto;
+          margin-left: auto;
+          justify-content: flex-end;
+          flex-wrap: nowrap;
         }
         .run-toggle-btn {
-          min-width: 122px;
+          min-width: 108px;
         }
         .config-head .collapse-btn {
-          min-width: 0;
+          min-width: 64px;
         }
         .config-lock-row {
           display: grid;
@@ -817,6 +822,14 @@
         }
         .summary-signal-status {
           max-width: 116px;
+        }
+        .run-toggle-btn {
+          min-width: 98px;
+          padding: 0 10px;
+        }
+        .config-head .collapse-btn {
+          min-width: 60px;
+          padding: 0 8px;
         }
         .symbol-chips {
           grid-template-columns: repeat(2, minmax(0, 1fr));
