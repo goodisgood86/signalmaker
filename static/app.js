@@ -405,8 +405,10 @@ let priceRefreshTimer = null;
 let mainRefreshTimer = null;
 let newsRefreshTimer = null;
 let simRefreshTimer = null;
+let fxRefreshTimer = null;
 let spotListWs = null;
 let futuresListWs = null;
+let listWsReconnectTimer = null;
 let chartWs = null;
 let chartWsReconnectTimer = null;
 let chartStreamKey = "";
@@ -1126,28 +1128,109 @@ function connectListStream(market, symbols) {
   return ws;
 }
 
+function stopListTickerStreams() {
+  if (listWsReconnectTimer) {
+    clearTimeout(listWsReconnectTimer);
+    listWsReconnectTimer = null;
+  }
+  const closeWs = (ws) => {
+    if (!ws) return;
+    try {
+      ws.onclose = null;
+      ws.onmessage = null;
+      ws.close();
+    } catch (_) {}
+  };
+  closeWs(spotListWs);
+  closeWs(futuresListWs);
+  spotListWs = null;
+  futuresListWs = null;
+}
+
+function scheduleListTickerReconnect() {
+  if (document.hidden) return;
+  if (listWsReconnectTimer) return;
+  listWsReconnectTimer = setTimeout(() => {
+    listWsReconnectTimer = null;
+    startListTickerStreams();
+  }, 2500);
+}
+
 function startListTickerStreams() {
-  if (spotListWs) {
-    try {
-      spotListWs.close();
-    } catch (_) {}
-  }
-  if (futuresListWs) {
-    try {
-      futuresListWs.close();
-    } catch (_) {}
-  }
+  stopListTickerStreams();
+  if (document.hidden) return;
 
   const spotSymbols = COINS.filter((c) => c.market === "spot").map((c) => c.symbol);
   const futuresSymbols = COINS.filter((c) => c.market === "futures").map((c) => c.symbol);
-  spotListWs = connectListStream("spot", spotSymbols);
-  futuresListWs = connectListStream("futures", futuresSymbols);
+  const nextSpotWs = connectListStream("spot", spotSymbols);
+  const nextFuturesWs = connectListStream("futures", futuresSymbols);
+  spotListWs = nextSpotWs;
+  futuresListWs = nextFuturesWs;
 
-  const onClose = () => {
-    setTimeout(() => startListTickerStreams(), 2500);
+  if (nextSpotWs) {
+    nextSpotWs.onclose = () => {
+      if (spotListWs !== nextSpotWs) return;
+      spotListWs = null;
+      scheduleListTickerReconnect();
+    };
+  }
+  if (nextFuturesWs) {
+    nextFuturesWs.onclose = () => {
+      if (futuresListWs !== nextFuturesWs) return;
+      futuresListWs = null;
+      scheduleListTickerReconnect();
+    };
+  }
+}
+
+function stopChartStream() {
+  if (chartWsReconnectTimer) {
+    clearTimeout(chartWsReconnectTimer);
+    chartWsReconnectTimer = null;
+  }
+  if (!chartWs) return;
+  try {
+    chartWs.onclose = null;
+    chartWs.onmessage = null;
+    chartWs.close();
+  } catch (_) {}
+  chartWs = null;
+}
+
+function stopAnalysisStream() {
+  if (analysisWsReconnectTimer) {
+    clearTimeout(analysisWsReconnectTimer);
+    analysisWsReconnectTimer = null;
+  }
+  if (!analysisWs) return;
+  try {
+    analysisWs.onclose = null;
+    analysisWs.onmessage = null;
+    analysisWs.close();
+  } catch (_) {}
+  analysisWs = null;
+}
+
+function handleVisibilityRealtime() {
+  if (document.hidden) {
+    stopListTickerStreams();
+    stopChartStream();
+    stopAnalysisStream();
+    return;
+  }
+  startListTickerStreams();
+  connectChartStream();
+  connectAnalysisStream();
+  safeLoadPrices();
+  loadNewsSentiment();
+  loadFxRate();
+}
+
+function bindVisibilityRealtime() {
+  document.addEventListener("visibilitychange", () => {
+    handleVisibilityRealtime();
   };
-  if (spotListWs) spotListWs.onclose = onClose;
-  if (futuresListWs) futuresListWs.onclose = onClose;
+  handleVisibilityRealtime();
 }
 
 function fmtTs(ms) {
@@ -1190,29 +1273,22 @@ function syncAnalysisControls() {
 }
 
 function connectChartStream() {
+  if (document.hidden) return;
   const interval = chartIntervalEl ? chartIntervalEl.value : "5m";
   const nextKey = `${selectedMarket}:${selectedSymbol}:${interval}`;
   if (chartWs && chartStreamKey === nextKey) return;
   chartStreamKey = nextKey;
 
-  if (chartWs) {
-    try {
-      chartWs.close();
-    } catch (_) {}
-    chartWs = null;
-  }
-  if (chartWsReconnectTimer) {
-    clearTimeout(chartWsReconnectTimer);
-    chartWsReconnectTimer = null;
-  }
+  stopChartStream();
   const symbol = selectedSymbol.toLowerCase();
   const base =
     selectedMarket === "futures"
       ? "wss://fstream.binance.com/ws/"
       : "wss://stream.binance.com:9443/ws/";
   const url = `${base}${symbol}@kline_${interval}`;
-  chartWs = new WebSocket(url);
-  chartWs.onmessage = (ev) => {
+  const ws = new WebSocket(url);
+  chartWs = ws;
+  ws.onmessage = (ev) => {
     if (!candleSeries) return;
     try {
       const msg = JSON.parse(ev.data);
@@ -1240,7 +1316,10 @@ function connectChartStream() {
       setCoinPrice(String(k.s).toUpperCase(), c);
     } catch (_) {}
   };
-  chartWs.onclose = () => {
+  ws.onclose = () => {
+    if (chartWs !== ws) return;
+    chartWs = null;
+    if (document.hidden) return;
     chartWsReconnectTimer = setTimeout(() => connectChartStream(), 2000);
   };
 }
@@ -1882,6 +1961,7 @@ function renderVolumeState(payload, analysisMode, analysisInterval) {
 }
 
 function connectAnalysisStream() {
+  if (document.hidden) return;
   const interval = normalizeAnalysisInterval(analysisIntervalEl ? analysisIntervalEl.value : "5m");
   const mode = analysisModeEl ? analysisModeEl.value : "single";
   const nextKey =
@@ -1891,24 +1971,16 @@ function connectAnalysisStream() {
   if (analysisWs && analysisStreamKey === nextKey) return;
   analysisStreamKey = nextKey;
 
-  if (analysisWs) {
-    try {
-      analysisWs.close();
-    } catch (_) {}
-    analysisWs = null;
-  }
-  if (analysisWsReconnectTimer) {
-    clearTimeout(analysisWsReconnectTimer);
-    analysisWsReconnectTimer = null;
-  }
+  stopAnalysisStream();
 
   const wsProto = location.protocol === "https:" ? "wss" : "ws";
   const urlBase = `${wsProto}://${location.host}/ws/analysis?symbol=${encodeURIComponent(
     selectedSymbol
   )}&market=${encodeURIComponent(selectedMarket)}&mode=${encodeURIComponent(mode)}&limit=500`;
   const url = mode === "mtf" ? urlBase : `${urlBase}&interval=${encodeURIComponent(interval)}`;
-  analysisWs = new WebSocket(url);
-  analysisWs.onmessage = (ev) => {
+  const ws = new WebSocket(url);
+  analysisWs = ws;
+  ws.onmessage = (ev) => {
     try {
       const raw = JSON.parse(ev.data);
       if (raw?.error) return;
@@ -1927,7 +1999,10 @@ function connectAnalysisStream() {
       renderAnalysisOnly(analysis, mode, selectedMarket);
     } catch (_) {}
   };
-  analysisWs.onclose = () => {
+  ws.onclose = () => {
+    if (analysisWs !== ws) return;
+    analysisWs = null;
+    if (document.hidden) return;
     analysisWsReconnectTimer = setTimeout(() => connectAnalysisStream(), 2000);
   };
 }
@@ -2565,6 +2640,7 @@ function startAutoRefresh() {
   if (priceRefreshTimer) clearInterval(priceRefreshTimer);
   if (mainRefreshTimer) clearInterval(mainRefreshTimer);
   if (simRefreshTimer) clearInterval(simRefreshTimer);
+  if (fxRefreshTimer) clearInterval(fxRefreshTimer);
 
   priceRefreshTimer = setInterval(() => {
     if (document.hidden) return;
@@ -2574,7 +2650,7 @@ function startAutoRefresh() {
   // 분석/차트는 websocket으로 실시간 반영한다.
   mainRefreshTimer = null;
 
-  setInterval(() => {
+  fxRefreshTimer = setInterval(() => {
     if (document.hidden) return;
     loadFxRate();
   }, FX_REFRESH_MS);
@@ -2675,5 +2751,5 @@ renderSimTrades(loadCachedSimTrades());
 loadSimTrades().catch(() => {});
 setSimRuleNote(false);
 startAutoRefresh();
-startListTickerStreams();
+bindVisibilityRealtime();
 loadNewsSentiment();
