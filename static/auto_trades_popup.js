@@ -48,6 +48,7 @@ const bnCollateralSpotEl = document.getElementById("bnCollateralSpot");
 const bnCollateralFuturesEl = document.getElementById("bnCollateralFutures");
 const bnLinkStatusEl = document.getElementById("bnLinkStatus");
 const logicOpenBtnEl = document.getElementById("logicOpenBtn");
+const centerCloseBtnEl = document.getElementById("centerCloseBtn");
 const logicModalEl = document.getElementById("logicModal");
 const logicModalCloseBtnEl = document.getElementById("logicModalCloseBtn");
 
@@ -1027,6 +1028,13 @@ if (cfgCollapseBtnEl) cfgCollapseBtnEl.addEventListener("click", () => toggleCon
 if (bnLinkBtnEl) bnLinkBtnEl.addEventListener("click", () => linkBinance());
 if (bnUnlinkBtnEl) bnUnlinkBtnEl.addEventListener("click", () => unlinkBinance());
 if (logicOpenBtnEl) logicOpenBtnEl.addEventListener("click", () => setLogicModalOpen(true));
+if (centerCloseBtnEl)
+  centerCloseBtnEl.addEventListener("click", () => {
+    try {
+      window.close();
+    } catch (_) {}
+    if (!window.closed) window.location.href = "/";
+  });
 if (logicModalCloseBtnEl) logicModalCloseBtnEl.addEventListener("click", () => setLogicModalOpen(false));
 if (logicModalEl) {
   logicModalEl.addEventListener("click", (ev) => {

@@ -51,6 +51,14 @@
         align-items: center;
         gap: 8px;
       }
+      .center-close-btn {
+        width: auto;
+        min-width: 76px;
+        height: 34px;
+        padding: 0 12px;
+        border-radius: 9px;
+        font-size: 12px;
+      }
       .logic-open-btn {
         width: auto;
         min-width: 88px;
@@ -221,6 +229,12 @@
         gap: 10px;
         margin-bottom: 0;
         flex-wrap: wrap;
+        position: relative;
+        z-index: 3;
+      }
+      .cfg-run-hint {
+        position: relative;
+        z-index: 3;
       }
       .config-head-actions {
         display: inline-flex;
@@ -733,6 +747,10 @@
           min-width: 76px;
           padding: 0 10px;
         }
+        .center-close-btn {
+          min-width: 66px;
+          padding: 0 10px;
+        }
       }
       @media (max-width: 420px) {
         .mobile-shell {
@@ -761,6 +779,7 @@
       <div class="title">자동매매 센터</div>
       <div class="head-tools">
         <button id="logicOpenBtn" class="ghost logic-open-btn" type="button">로직 보기</button>
+        <button id="centerCloseBtn" class="ghost center-close-btn" type="button">닫기</button>
       </div>
     </div>
     <section class="config is-locked is-collapsed" id="configSection">
@@ -995,6 +1014,6 @@
         </div>
       </div>
     </div>
-    <script src="/static/auto_trades_popup.js?v=20260220ao"></script>
+    <script src="/static/auto_trades_popup.js?v=20260220aq"></script>
   </body>
 </html>
