@@ -44,30 +44,44 @@ from .volume_profile import compute_volume_profile
 
 
 def _load_local_ops_env_if_present() -> None:
-    env_path = Path("configs/ops.env")
-    if not env_path.exists() or not env_path.is_file():
-        return
-    try:
-        lines = env_path.read_text(encoding="utf-8").splitlines()
-    except Exception:
-        return
-    for raw_line in lines:
-        line = str(raw_line or "").strip()
-        if not line or line.startswith("#"):
+    app_root = Path(__file__).resolve().parent.parent
+    env_file_hint = str(os.getenv("APP_ENV_FILE", "")).strip()
+    candidates: List[Path] = []
+    if env_file_hint:
+        candidates.append(Path(env_file_hint))
+    candidates.append(Path("configs/ops.env"))
+    candidates.append(app_root / "configs/ops.env")
+    seen: set[str] = set()
+    for p in candidates:
+        path = p.expanduser()
+        path_str = str(path.resolve()) if path.exists() else str(path)
+        if path_str in seen:
             continue
-        if line.startswith("export "):
-            line = line[7:].strip()
-        if "=" not in line:
+        seen.add(path_str)
+        if not path.exists() or not path.is_file():
             continue
-        k, v = line.split("=", 1)
-        key = str(k or "").strip()
-        if not key:
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except Exception:
             continue
-        val = str(v or "").strip()
-        if len(val) >= 2 and ((val.startswith("'") and val.endswith("'")) or (val.startswith('"') and val.endswith('"'))):
-            val = val[1:-1]
-        if key not in os.environ:
-            os.environ[key] = val
+        for raw_line in lines:
+            line = str(raw_line or "").strip()
+            if not line or line.startswith("#"):
+                continue
+            if line.startswith("export "):
+                line = line[7:].strip()
+            if "=" not in line:
+                continue
+            k, v = line.split("=", 1)
+            key = str(k or "").strip()
+            if not key:
+                continue
+            val = str(v or "").strip()
+            if len(val) >= 2 and ((val.startswith("'") and val.endswith("'")) or (val.startswith('"') and val.endswith('"'))):
+                val = val[1:-1]
+            current = str(os.environ.get(key, "")).strip()
+            if not current:
+                os.environ[key] = val
 
 
 _load_local_ops_env_if_present()
