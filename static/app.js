@@ -665,10 +665,13 @@ function coinKey(symbol, market) {
 function bindCoinItemEvents(btn, symbol, market) {
   const onSelect = () => handleSelectCoin(symbol, market);
   let touchStart = null;
+  let lastPointerType = "mouse";
   btn.addEventListener("pointerdown", (ev) => {
-    if (ev.pointerType === "mouse") return;
+    const pType = String(ev.pointerType || "mouse");
+    lastPointerType = pType;
     touchStart = {
       id: ev.pointerId,
+      pointerType: pType,
       x: Number(ev.clientX || 0),
       y: Number(ev.clientY || 0),
       sy: Number(window.scrollY || window.pageYOffset || 0),
@@ -683,27 +686,29 @@ function bindCoinItemEvents(btn, symbol, market) {
     if (dx > 8 || dy > 8) touchStart.moved = true;
   });
   btn.addEventListener("pointercancel", () => {
-    suppressCoinClickUntil = Date.now() + 300;
+    if (touchStart?.pointerType !== "mouse") suppressCoinClickUntil = Date.now() + 300;
     touchStart = null;
   });
   btn.addEventListener("pointerup", (ev) => {
     if (!touchStart || ev.pointerId !== touchStart.id) return;
+    const pointerType = String(touchStart.pointerType || "mouse");
     const elapsed = Date.now() - touchStart.ts;
     const syNow = Number(window.scrollY || window.pageYOffset || 0);
     const pageScrolled = Math.abs(syNow - Number(touchStart.sy || 0)) > 2;
     const recentScroll = Date.now() - lastScrollActivityTs < 160;
-    const shouldSelect = !touchStart.moved && !pageScrolled && !recentScroll && elapsed <= 650;
+    let shouldSelect = !touchStart.moved && elapsed <= 650;
+    if (pointerType !== "mouse") shouldSelect = shouldSelect && !pageScrolled && !recentScroll;
     touchStart = null;
     if (!shouldSelect) {
-      suppressCoinClickUntil = Date.now() + 260;
+      if (pointerType !== "mouse") suppressCoinClickUntil = Date.now() + 260;
       return;
     }
-    suppressCoinClickUntil = Date.now() + 420;
+    suppressCoinClickUntil = Date.now() + (pointerType === "mouse" ? 180 : 420);
     onSelect();
   });
   btn.addEventListener("click", () => {
     if (Date.now() < suppressCoinClickUntil) return;
-    if (window.innerWidth <= 1100 && Date.now() - lastScrollActivityTs < 160) return;
+    if (lastPointerType !== "mouse" && window.innerWidth <= 1100 && Date.now() - lastScrollActivityTs < 160) return;
     onSelect();
   });
 }
