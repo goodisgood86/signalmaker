@@ -248,6 +248,7 @@ _AUTO_AUDIT_TASKS: List[asyncio.Task] = []
 _AUTO_AUDIT_DROP_COUNT = 0
 _KST_OFFSET_MS = 9 * 60 * 60 * 1000
 _AUTO_LOG = logging.getLogger("coin.auto_trade")
+_AUTO_RUNTIME_STATE: Dict[int, Dict[str, Any]] = {}
 _AUTO_BINANCE_BAN_UNTIL_MS = 0
 _AUTO_COLLATERAL_CACHE_TTL_S = max(
     10.0, float(str(os.getenv("AUTO_COLLATERAL_CACHE_TTL_S", "30")) or "30")
@@ -435,6 +436,55 @@ def _auto_get_tick_lock() -> asyncio.Lock:
     if _AUTO_TICK_LOCK is None:
         _AUTO_TICK_LOCK = asyncio.Lock()
     return _AUTO_TICK_LOCK
+
+
+def _auto_sanitize_runtime_plan(plan: Any) -> Dict[str, Any] | None:
+    if not isinstance(plan, dict):
+        return None
+    out: Dict[str, Any] = {}
+    side = str(plan.get("side", "")).upper().strip()
+    if side in {"BUY", "SELL"}:
+        out["side"] = side
+    for k in ("entry_price", "stop_price", "tp1_price", "tp2_price"):
+        v = plan.get(k)
+        try:
+            n = float(v)
+        except Exception:
+            continue
+        if math.isfinite(n):
+            out[k] = round(n, 8)
+    return out or None
+
+
+def _auto_set_runtime_state(*, user_id: int, source: str, result: Any) -> None:
+    if int(user_id) <= 0:
+        return
+    row = result if isinstance(result, dict) else {}
+    now_ms = int(time() * 1000)
+    state: Dict[str, Any] = {
+        "tick_ms": now_ms,
+        "source": str(source or "")[:24],
+        "action": str(row.get("action", "") or "")[:64],
+        "reason": str(row.get("reason", "") or "")[:120],
+        "detail": str(row.get("detail", "") or "")[:220],
+    }
+    plan = _auto_sanitize_runtime_plan(row.get("plan"))
+    if plan:
+        state["plan"] = plan
+    signal = row.get("signal")
+    if isinstance(signal, dict):
+        signal_out: Dict[str, Any] = {}
+        for k in ("buy_pct", "sell_pct", "confidence", "regime", "side", "diff"):
+            if k not in signal:
+                continue
+            v = signal.get(k)
+            if isinstance(v, (int, float)) and math.isfinite(float(v)):
+                signal_out[k] = float(v)
+            elif isinstance(v, str):
+                signal_out[k] = v[:48]
+        if signal_out:
+            state["signal"] = signal_out
+    _AUTO_RUNTIME_STATE[int(user_id)] = state
 
 
 def _auth_is_public_path(path: str) -> bool:
@@ -4827,6 +4877,7 @@ async def api_auto_trade_runtime():
     public_user = await _sim_get_or_create_public_user()
     user_id = int(public_user.get("id"))
     cfg = await _auto_get_or_create_config(user_id)
+    tick = _AUTO_RUNTIME_STATE.get(int(user_id), {})
     return {
         "ok": True,
         "runtime": {
@@ -4835,6 +4886,7 @@ async def api_auto_trade_runtime():
             "mode": str(cfg.get("mode") or ""),
             "interval": str(cfg.get("interval") or ""),
             "last_run_ms": int(cfg.get("last_run_ms", 0) or 0),
+            "last_tick": dict(tick) if isinstance(tick, dict) else {},
         },
     }
 
@@ -5627,12 +5679,18 @@ async def _auto_trade_bg_loop(app_obj: FastAPI) -> None:
         try:
             public_user = await _sim_get_or_create_public_user()
             user_id = int(public_user.get("id") or 0)
-            await _auto_trade_tick_core(user_id, force_run=False, source="scheduler")
+            result = await _auto_trade_tick_core(user_id, force_run=False, source="scheduler")
+            _auto_set_runtime_state(user_id=user_id, source="scheduler", result=result)
         except asyncio.CancelledError:
             raise
         except Exception as e:
             _AUTO_LOG.exception("auto trade scheduler tick failed")
             if user_id > 0:
+                _auto_set_runtime_state(
+                    user_id=user_id,
+                    source="scheduler",
+                    result={"action": "TICK_ERROR", "detail": f"{type(e).__name__}: {str(e)[:200]}"},
+                )
                 try:
                     await _auto_audit_log(
                         user_id=user_id,
@@ -5655,7 +5713,9 @@ async def api_auto_trade_tick(
     public_user = await _sim_get_or_create_public_user()
     user_id = int(public_user.get("id"))
     force_run = bool(payload.get("force", False))
-    return await _auto_trade_tick_core(user_id, force_run=force_run, source="api")
+    result = await _auto_trade_tick_core(user_id, force_run=force_run, source="api")
+    _auto_set_runtime_state(user_id=user_id, source="api", result=result)
+    return result
 
 
 @app.get("/api/auto_trade/records")

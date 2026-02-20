@@ -76,6 +76,7 @@ let activeLoadSeq = 0;
 let refreshTimer = null;
 let statsRefreshTimer = null;
 let collateralRefreshTimer = null;
+let runtimeRefreshTimer = null;
 let binanceLinkBusy = false;
 let binanceLinkActive = false;
 let configUnlocked = false;
@@ -508,6 +509,15 @@ async function loadRuntimeStatus() {
     const runtime = data?.runtime || {};
     autoRunActive = Boolean(runtime?.enabled);
     runningSymbol = normalizeTradeSymbol(runtime?.symbol || cfgSymbolEl?.value || "BTCUSDT");
+    const lastTick = runtime?.last_tick;
+    if (lastTick && typeof lastTick === "object" && String(lastTick?.action || "").trim()) {
+      setTickStatusFromResponse({
+        action: String(lastTick?.action || ""),
+        reason: String(lastTick?.reason || ""),
+        detail: String(lastTick?.detail || ""),
+        plan: lastTick?.plan || null,
+      });
+    }
     if (cfgEnabledEl) cfgEnabledEl.checked = autoRunActive;
     updateTopRunButton();
     updateCurrentTradeStateChip();
@@ -1178,10 +1188,15 @@ statsRefreshTimer = setInterval(() => {
   if (document.hidden) return;
   loadStats(false).catch(() => {});
 }, STATS_REFRESH_INTERVAL_MS);
+runtimeRefreshTimer = setInterval(() => {
+  if (document.hidden) return;
+  loadRuntimeStatus().catch(() => {});
+}, 15000);
 window.addEventListener("beforeunload", () => {
   if (refreshTimer) clearInterval(refreshTimer);
   if (statsRefreshTimer) clearInterval(statsRefreshTimer);
   if (collateralRefreshTimer) clearInterval(collateralRefreshTimer);
+  if (runtimeRefreshTimer) clearInterval(runtimeRefreshTimer);
 });
 
 collateralRefreshTimer = setInterval(() => {
