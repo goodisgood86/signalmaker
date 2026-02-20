@@ -67,6 +67,7 @@ const passCheckPassesEl = document.getElementById("passCheckPasses");
 const passCheckHitRateEl = document.getElementById("passCheckHitRate");
 const entrySwingBadgeEl = document.getElementById("entrySwingBadge");
 const coinSideStickyEl = document.querySelector(".coin-side-sticky");
+const coinSidePanelEl = document.querySelector(".coin-side");
 const mainLayoutEl = document.querySelector(".main");
 let sidebarPinRaf = 0;
 let sidebarPinObserver = null;
@@ -86,6 +87,16 @@ const COIN_LIST_SCROLL_DEFER_MS = 380;
 function clearSidebarPin() {
   if (!coinSideStickyEl) return;
   coinSideStickyEl.style.transform = "";
+  coinSideStickyEl.style.height = "";
+  if (!coinSidePanelEl) return;
+  coinSidePanelEl.style.position = "";
+  coinSidePanelEl.style.left = "";
+  coinSidePanelEl.style.top = "";
+  coinSidePanelEl.style.width = "";
+  coinSidePanelEl.style.maxHeight = "";
+  coinSidePanelEl.style.height = "";
+  coinSidePanelEl.style.overflowY = "";
+  coinSidePanelEl.style.overflowX = "";
 }
 
 function flushDeferredCoinListRender() {
@@ -151,6 +162,7 @@ function isLikelyMobileBrowser() {
 function updateDesktopModeClass() {
   const desktop = !isLikelyMobileBrowser();
   document.body.classList.toggle("desktop-mode", desktop);
+  scheduleSidebarPinUpdate();
 }
 
 function findScrollHost(el) {
@@ -181,8 +193,37 @@ function getScrollTopAndRect(host) {
 }
 
 function updateSidebarPinNow() {
-  // CSS sticky를 기본으로 사용한다. JS 강제 이동은 모바일 렌더링 깜빡임을 유발할 수 있어 비활성화.
-  clearSidebarPin();
+  if (!coinSideStickyEl || !coinSidePanelEl || !mainLayoutEl) return;
+  const desktopMode = document.body.classList.contains("desktop-mode");
+  if (!desktopMode || window.innerWidth <= 900) {
+    clearSidebarPin();
+    return;
+  }
+  const mainRect = mainLayoutEl.getBoundingClientRect();
+  const wrapRect = coinSideStickyEl.getBoundingClientRect();
+  if (mainRect.width <= 0 || wrapRect.width <= 0 || mainLayoutEl.offsetHeight <= 0) return;
+
+  const topGap = 12;
+  const bottomGap = 12;
+  const blockHeight = Math.max(240, Math.round(window.innerHeight - topGap - bottomGap));
+  const mainTopDoc = window.scrollY + mainRect.top;
+  const mainBottomDoc = mainTopDoc + mainLayoutEl.offsetHeight;
+
+  let topPx = topGap;
+  if (window.scrollY + topGap < mainTopDoc) topPx = mainTopDoc - window.scrollY;
+  const maxTopPx = mainBottomDoc - window.scrollY - blockHeight - bottomGap;
+  if (Number.isFinite(maxTopPx)) topPx = Math.min(topPx, maxTopPx);
+  topPx = Math.max(0, topPx);
+
+  coinSideStickyEl.style.height = `${blockHeight}px`;
+  coinSidePanelEl.style.position = "fixed";
+  coinSidePanelEl.style.left = `${Math.round(mainRect.left)}px`;
+  coinSidePanelEl.style.top = `${Math.round(topPx)}px`;
+  coinSidePanelEl.style.width = `${Math.round(wrapRect.width)}px`;
+  coinSidePanelEl.style.maxHeight = `${blockHeight}px`;
+  coinSidePanelEl.style.height = `${blockHeight}px`;
+  coinSidePanelEl.style.overflowY = "auto";
+  coinSidePanelEl.style.overflowX = "hidden";
 }
 
 function scheduleSidebarPinUpdate() {
@@ -194,9 +235,20 @@ function scheduleSidebarPinUpdate() {
 }
 
 function initSidebarPinFallback() {
-  if (!coinSideStickyEl) return;
-  clearSidebarPin();
-  window.addEventListener("resize", () => clearSidebarPin(), { passive: true });
+  if (!coinSideStickyEl || !mainLayoutEl) return;
+  sidebarScrollHost = findScrollHost(mainLayoutEl);
+  window.addEventListener("resize", scheduleSidebarPinUpdate, { passive: true });
+  window.addEventListener("scroll", scheduleSidebarPinUpdate, { passive: true });
+  document.addEventListener("scroll", scheduleSidebarPinUpdate, true);
+  if (sidebarScrollHost && sidebarScrollHost !== window) {
+    sidebarScrollHost.addEventListener("scroll", scheduleSidebarPinUpdate, { passive: true });
+  }
+  if ("ResizeObserver" in window) {
+    sidebarPinObserver = new ResizeObserver(() => scheduleSidebarPinUpdate());
+    sidebarPinObserver.observe(mainLayoutEl);
+    sidebarPinObserver.observe(coinSideStickyEl);
+  }
+  scheduleSidebarPinUpdate();
 }
 
 function setStepStatus(el, ok) {
