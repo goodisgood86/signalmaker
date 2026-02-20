@@ -168,6 +168,7 @@ body {
   min-height: 0;
   position: sticky !important;
   top: 12px;
+  height: calc(100vh - 24px);
   align-self: start;
   width: 100%;
   min-width: 0;
@@ -182,8 +183,8 @@ body {
   top: auto;
   min-height: 0;
   width: auto;
-  height: auto;
-  max-height: calc(100vh - 24px);
+  height: 100%;
+  max-height: none;
   overflow-y: auto;
   overflow-x: hidden;
   scrollbar-gutter: stable;
@@ -234,9 +235,20 @@ body {
 }
 
 @media (hover: none) and (pointer: coarse) {
+  .coin-item {
+    transition: none;
+  }
+
   .coin-item:active {
     border-color: var(--line);
     background: rgba(255, 255, 255, 0.03);
+  }
+
+  .coin-item:not(.active):focus,
+  .coin-item:not(.active):focus-visible {
+    border-color: var(--line);
+    background: rgba(255, 255, 255, 0.03);
+    outline: none;
   }
 }
 
@@ -1475,6 +1487,7 @@ label.chk input[type="checkbox"] {
   .coin-side-sticky {
     position: static !important;
     top: auto;
+    height: auto;
     left: auto;
     width: auto;
     transform: none;
@@ -1546,6 +1559,7 @@ label.chk input[type="checkbox"] {
   .coin-side-sticky {
     position: static !important;
     top: auto;
+    height: auto;
     left: auto;
     width: auto;
     transform: none;
@@ -1625,6 +1639,7 @@ label.chk input[type="checkbox"] {
   .coin-side-sticky {
     position: static !important;
     top: auto;
+    height: auto;
     left: auto;
     width: auto;
     overflow: visible;
