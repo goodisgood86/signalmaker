@@ -246,9 +246,31 @@
         margin-left: auto;
         flex-wrap: wrap;
       }
+      .config-title-wrap {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        min-width: 0;
+      }
       .config-title {
         font-size: 14px;
         font-weight: 780;
+      }
+      .run-symbol-chip {
+        display: inline-flex;
+        align-items: center;
+        border-radius: 999px;
+        border: 1px solid rgba(122, 245, 198, 0.42);
+        padding: 3px 8px;
+        font-size: 11px;
+        font-weight: 760;
+        line-height: 1.2;
+        color: rgba(218, 255, 241, 0.96);
+        background: rgba(122, 245, 198, 0.12);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 96px;
       }
       .run-toggle-btn {
         width: auto;
@@ -776,6 +798,13 @@
         .config-head {
           flex-wrap: nowrap;
         }
+        .config-title-wrap {
+          min-width: 0;
+          flex: 1 1 auto;
+        }
+        .run-symbol-chip {
+          max-width: 82px;
+        }
         .config-head-actions {
           width: auto;
           margin-left: auto;
@@ -823,6 +852,9 @@
         .summary-signal-status {
           max-width: 116px;
         }
+        .run-symbol-chip {
+          max-width: 74px;
+        }
         .run-toggle-btn {
           min-width: 98px;
           padding: 0 10px;
@@ -859,7 +891,10 @@
     </div>
     <section class="config is-locked is-collapsed" id="configSection">
       <div class="config-head">
-        <div class="config-title">자동매매 설정</div>
+        <div class="config-title-wrap">
+          <div class="config-title">자동매매 설정</div>
+          <span id="cfgRunningSymbolChip" class="run-symbol-chip" hidden></span>
+        </div>
         <div class="config-head-actions">
           <button id="cfgTopRunBtn" class="primary run-toggle-btn" type="button" disabled>지금 실행</button>
           <button id="cfgCollapseBtn" class="ghost collapse-btn" type="button" aria-expanded="false" aria-controls="configContent">펼치기</button>
@@ -1095,6 +1130,6 @@
         </div>
       </div>
     </div>
-    <script src="/static/auto_trades_popup.js?v=20260220ax"></script>
+    <script src="/static/auto_trades_popup.js?v=20260220ay"></script>
   </body>
 </html>

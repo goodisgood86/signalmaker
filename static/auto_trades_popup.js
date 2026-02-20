@@ -29,6 +29,7 @@ const cfgSaveBtnEl = document.getElementById("cfgSaveBtn");
 const cfgRunBtnEl = document.getElementById("cfgRunBtn");
 const cfgTopRunBtnEl = document.getElementById("cfgTopRunBtn");
 const cfgTopRunHintEl = document.getElementById("cfgTopRunHint");
+const cfgRunningSymbolChipEl = document.getElementById("cfgRunningSymbolChip");
 const cfgStatusEl = document.getElementById("cfgStatus");
 const cfgSaveHintEl = document.getElementById("cfgSaveHint");
 const configSectionEl = document.getElementById("configSection");
@@ -89,6 +90,7 @@ let lastCollateralFetchMs = 0;
 const COLLATERAL_MIN_INTERVAL_MS = 30000;
 const STATS_REFRESH_INTERVAL_MS = 60000;
 let latestOpenCount = null;
+let runningSymbol = "BTCUSDT";
 
 function fmtPrice(v) {
   const n = Number(v);
@@ -203,11 +205,29 @@ function marketBySymbol(symbol) {
   return String(symbol || "").toUpperCase() === "CROSSUSDT" ? "futures" : "spot";
 }
 
+function normalizeTradeSymbol(symbol) {
+  const s = String(symbol || "").toUpperCase();
+  return TRADE_SYMBOLS.includes(s) ? s : "BTCUSDT";
+}
+
+function updateRunningSymbolChip() {
+  if (!cfgRunningSymbolChipEl) return;
+  const symbol = normalizeTradeSymbol(runningSymbol || cfgSymbolEl?.value || "BTCUSDT");
+  if (!autoRunActive) {
+    cfgRunningSymbolChipEl.hidden = true;
+    cfgRunningSymbolChipEl.textContent = "";
+    return;
+  }
+  cfgRunningSymbolChipEl.hidden = false;
+  cfgRunningSymbolChipEl.textContent = symbol;
+}
+
 function applySymbolSelection(symbol) {
-  const s = String(symbol || "BTCUSDT").toUpperCase();
-  const target = TRADE_SYMBOLS.includes(s) ? s : "BTCUSDT";
+  const target = normalizeTradeSymbol(symbol || "BTCUSDT");
   if (cfgSymbolEl) cfgSymbolEl.value = target;
   if (cfgMarketEl) cfgMarketEl.value = marketBySymbol(target);
+  runningSymbol = target;
+  updateRunningSymbolChip();
   if (!cfgSymbolChipsEl) return;
   const chips = cfgSymbolChipsEl.querySelectorAll(".symbol-chip");
   chips.forEach((chip) => {
@@ -304,7 +324,10 @@ function setLogicModalOpen(open) {
 }
 
 function updateTopRunButton() {
-  if (!cfgTopRunBtnEl) return;
+  if (!cfgTopRunBtnEl) {
+    updateRunningSymbolChip();
+    return;
+  }
   updateSaveButtonState();
   const locked = !isConfigUnlocked();
   const blockedByCollateral = collateralInsufficient && !autoRunActive;
@@ -318,6 +341,7 @@ function updateTopRunButton() {
     cfgTopRunBtnEl.classList.add("is-disabled");
     cfgTopRunBtnEl.title = runDisabledReason;
     if (cfgTopRunHintEl) cfgTopRunHintEl.textContent = runDisabledReason;
+    updateRunningSymbolChip();
     return;
   }
   if (autoRunActive) {
@@ -327,6 +351,7 @@ function updateTopRunButton() {
     cfgTopRunBtnEl.classList.toggle("is-disabled", cfgTopRunBtnEl.disabled);
     cfgTopRunBtnEl.title = runDisabledReason;
     if (cfgTopRunHintEl) cfgTopRunHintEl.textContent = runDisabledReason;
+    updateRunningSymbolChip();
     return;
   }
   cfgTopRunBtnEl.textContent = "지금 실행";
@@ -336,6 +361,7 @@ function updateTopRunButton() {
   cfgTopRunBtnEl.classList.toggle("is-disabled", cfgTopRunBtnEl.disabled);
   cfgTopRunBtnEl.title = runDisabledReason;
   if (cfgTopRunHintEl) cfgTopRunHintEl.textContent = runDisabledReason;
+  updateRunningSymbolChip();
 }
 
 function setConfigDirty(dirty) {
@@ -481,6 +507,7 @@ async function loadRuntimeStatus() {
     const data = await fetchJSON("/api/auto_trade/runtime");
     const runtime = data?.runtime || {};
     autoRunActive = Boolean(runtime?.enabled);
+    runningSymbol = normalizeTradeSymbol(runtime?.symbol || cfgSymbolEl?.value || "BTCUSDT");
     if (cfgEnabledEl) cfgEnabledEl.checked = autoRunActive;
     updateTopRunButton();
     updateCurrentTradeStateChip();
@@ -499,6 +526,7 @@ function setUnlockBusy(busy) {
 function applyConfig(cfg) {
   if (!cfg || typeof cfg !== "object") return;
   autoRunActive = Boolean(cfg.enabled);
+  runningSymbol = normalizeTradeSymbol(cfg.symbol || cfgSymbolEl?.value || "BTCUSDT");
   if (cfgEnabledEl) cfgEnabledEl.checked = autoRunActive;
   applySymbolSelection(String(cfg.symbol || "BTCUSDT"));
   if (cfgIntervalEl) cfgIntervalEl.value = String(cfg.interval || "5m");
