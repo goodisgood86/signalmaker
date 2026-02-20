@@ -1229,7 +1229,7 @@ function handleVisibilityRealtime() {
 function bindVisibilityRealtime() {
   document.addEventListener("visibilitychange", () => {
     handleVisibilityRealtime();
-  };
+  });
   handleVisibilityRealtime();
 }
 
