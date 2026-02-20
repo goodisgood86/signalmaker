@@ -750,11 +750,6 @@ async function toggleTopRun() {
     setCfgLockStatus("먼저 비밀번호를 입력해주세요.");
     return;
   }
-  if (!autoRunActive && configDirty) {
-    setCfgStatus("설정을 저장한 뒤 실행할 수 있습니다.");
-    updateTopRunButton();
-    return;
-  }
   if (!autoRunActive && collateralInsufficient) {
     setCfgStatus("담보금 부족으로 실행할 수 없습니다.");
     updateTopRunButton();
@@ -768,16 +763,17 @@ async function toggleTopRun() {
     if (ok) setCfgStatus("자동매매가 중지되었습니다.");
     return;
   }
+  // 시작 전 저장을 먼저 수행해야 saveConfig의 "진행 중 저장 불가" 가드와 충돌하지 않는다.
   if (cfgEnabledEl) cfgEnabledEl.checked = true;
-  autoRunActive = true;
-  updateTopRunButton();
   const ok = await saveConfig(true);
   if (!ok) {
-    autoRunActive = false;
     if (cfgEnabledEl) cfgEnabledEl.checked = false;
+    setCfgStatus("설정 저장 완료 후 실행할 수 있습니다.");
     updateTopRunButton();
     return;
   }
+  autoRunActive = true;
+  updateTopRunButton();
   try {
     await triggerTickOnce();
   } catch (e) {
