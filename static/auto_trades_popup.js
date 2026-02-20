@@ -4,7 +4,6 @@ const filterStatusEl = document.getElementById("filterStatus");
 const summaryEl = document.getElementById("summary");
 const summarySignalStatusEl = document.getElementById("summarySignalStatus");
 const summaryRefreshBtnEl = document.getElementById("summaryRefreshBtn");
-const recordsStateChipEl = document.getElementById("recordsStateChip");
 const recordsBodyEl = document.getElementById("recordsBody");
 const emptyStateEl = document.getElementById("emptyState");
 const prevBtnEl = document.getElementById("prevBtn");
@@ -229,10 +228,7 @@ function applyExitModeUI() {
 function setCfgStatus(msg) {
   const text = String(msg || "");
   if (cfgStatusEl) cfgStatusEl.textContent = text;
-  if (summarySignalStatusEl) {
-    if (text) summarySignalStatusEl.textContent = text;
-    else summarySignalStatusEl.textContent = currentTradeStateInfo().text;
-  }
+  updateCurrentTradeStateChip();
 }
 
 function currentTradeStateInfo(records = null) {
@@ -245,7 +241,7 @@ function currentTradeStateInfo(records = null) {
     if (Number.isFinite(openCount) && openCount > 0) {
       return { text: `거래중 ${openCount}건`, cls: "live" };
     }
-    return { text: "자동매매 진행 중", cls: "wait" };
+    return { text: "진입 대기중", cls: "wait" };
   }
   if (collateralInsufficient) return { text: "담보금 부족", cls: "warn" };
   if (Number.isFinite(openCount) && openCount > 0) {
@@ -254,15 +250,16 @@ function currentTradeStateInfo(records = null) {
   return { text: "자동매매 중지", cls: "off" };
 }
 
+function shouldShowSummarySignalStatus(info) {
+  if (!info || typeof info !== "object") return false;
+  return info.cls === "wait" || info.cls === "live";
+}
+
 function updateCurrentTradeStateChip(records = null) {
   const info = currentTradeStateInfo(records);
-  if (recordsStateChipEl) {
-    recordsStateChipEl.textContent = info.text;
-    recordsStateChipEl.classList.remove("live", "wait", "warn", "off");
-    recordsStateChipEl.classList.add(info.cls);
-  }
-  if (summarySignalStatusEl && !String(summarySignalStatusEl.textContent || "").trim()) {
-    summarySignalStatusEl.textContent = info.text;
+  if (summarySignalStatusEl) {
+    if (shouldShowSummarySignalStatus(info)) summarySignalStatusEl.textContent = info.text;
+    else summarySignalStatusEl.textContent = "";
   }
 }
 

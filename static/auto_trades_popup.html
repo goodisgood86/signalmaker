@@ -143,41 +143,6 @@
         flex-wrap: wrap;
         margin-bottom: 8px;
       }
-      .records-state-wrap {
-        margin-left: auto;
-      }
-      .records-state-chip {
-        display: inline-flex;
-        align-items: center;
-        border-radius: 999px;
-        border: 1px solid rgba(255, 255, 255, 0.24);
-        padding: 5px 10px;
-        font-size: 12px;
-        font-weight: 760;
-        line-height: 1.2;
-        color: rgba(234, 243, 255, 0.94);
-        background: rgba(255, 255, 255, 0.06);
-      }
-      .records-state-chip.live {
-        color: #7af5c6;
-        border-color: rgba(122, 245, 198, 0.45);
-        background: rgba(122, 245, 198, 0.12);
-      }
-      .records-state-chip.wait {
-        color: #c6ddff;
-        border-color: rgba(173, 206, 255, 0.42);
-        background: rgba(140, 184, 255, 0.12);
-      }
-      .records-state-chip.warn {
-        color: #ffd6e1;
-        border-color: rgba(255, 154, 176, 0.45);
-        background: rgba(255, 154, 176, 0.15);
-      }
-      .records-state-chip.off {
-        color: rgba(234, 243, 255, 0.86);
-        border-color: rgba(255, 255, 255, 0.22);
-        background: rgba(255, 255, 255, 0.06);
-      }
       .filters {
         display: grid;
         grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -792,10 +757,6 @@
         .filters {
           grid-template-columns: 1fr;
         }
-        .records-state-wrap {
-          width: 100%;
-          margin-left: 0;
-        }
         .summary-signal-status {
           width: 100%;
           max-width: 100%;
@@ -1041,9 +1002,6 @@
           <select id="filterMode"></select>
           <select id="filterStatus"></select>
         </div>
-        <div class="records-state-wrap">
-          <span id="recordsStateChip" class="records-state-chip off">상태 확인중</span>
-        </div>
       </div>
       <div class="records-wrap">
         <table class="records-table">
@@ -1117,6 +1075,6 @@
         </div>
       </div>
     </div>
-    <script src="/static/auto_trades_popup.js?v=20260220av"></script>
+    <script src="/static/auto_trades_popup.js?v=20260220aw"></script>
   </body>
 </html>
