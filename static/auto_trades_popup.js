@@ -83,6 +83,8 @@ let autoRunActive = false;
 let latestCollateral = null;
 let collateralInsufficient = false;
 let collateralGuardBusy = false;
+let lastCollateralFetchMs = 0;
+const COLLATERAL_MIN_INTERVAL_MS = 30000;
 
 function fmtPrice(v) {
   const n = Number(v);
@@ -649,11 +651,19 @@ function renderBinanceCollateral(collateral) {
 
 async function loadBinanceCollateral() {
   if (binanceCollateralLoading) return;
+  const nowMs = Date.now();
+  if (lastCollateralFetchMs > 0 && nowMs - lastCollateralFetchMs < COLLATERAL_MIN_INTERVAL_MS) return;
   binanceCollateralLoading = true;
+  lastCollateralFetchMs = nowMs;
   try {
     const data = await fetchJSON("/api/auto_trade/binance/collateral");
     renderBinanceCollateral(data?.collateral || {});
     await enforceCollateralGuard();
+    if (Boolean(data?.collateral?.stale)) {
+      setBnLinkStatus("바이낸스 요청 제한으로 캐시된 담보금을 표시 중입니다.");
+    } else {
+      setBnLinkStatus("");
+    }
   } catch (e) {
     const msg = errMessage(e);
     if (handleLockedError(msg)) return;
@@ -664,7 +674,12 @@ async function loadBinanceCollateral() {
       updateTopRunButton();
       return;
     }
+    if (msg.includes("-1003") || msg.toLowerCase().includes("rate limit")) {
+      setBnLinkStatus(`요청 제한 상태입니다. 잠시 후 자동 재시도합니다. (${msg})`);
+      return;
+    }
     setBnCollateralCards("조회 실패", "조회 실패", "조회 실패");
+    setBnLinkStatus(`담보금 조회 실패: ${msg}`);
   } finally {
     binanceCollateralLoading = false;
   }
@@ -675,8 +690,12 @@ async function loadBinanceLink() {
     const data = await fetchJSON("/api/auto_trade/binance/link");
     const link = data?.link || {};
     renderBinanceLink(link);
-    if (Boolean(link?.linked)) await loadBinanceCollateral();
-    setBnLinkStatus("");
+    if (Boolean(link?.linked)) {
+      lastCollateralFetchMs = 0;
+      await loadBinanceCollateral();
+    } else {
+      setBnLinkStatus("");
+    }
   } catch (e) {
     const msg = errMessage(e);
     if (handleLockedError(msg)) return;
@@ -704,10 +723,15 @@ async function linkBinance() {
       body: JSON.stringify({ api_key: apiKey, api_secret: apiSecret }),
     });
     renderBinanceLink(data?.link || {});
+    lastCollateralFetchMs = 0;
     await loadBinanceCollateral();
     if (bnApiKeyEl) bnApiKeyEl.value = "";
     if (bnApiSecretEl) bnApiSecretEl.value = "";
-    setBnLinkStatus("");
+    if (Boolean(data?.verify_skipped)) {
+      setBnLinkStatus("요청 제한으로 검증을 일시 건너뛰고 저장했습니다. 잠시 후 담보금 조회로 확인하세요.");
+    } else {
+      setBnLinkStatus("");
+    }
   } catch (e) {
     const msg = errMessage(e);
     if (handleLockedError(msg)) return;
@@ -785,7 +809,7 @@ async function toggleTopRun() {
     if (handleLockedError(msg)) return;
     setCfgStatus(`실행 실패: ${msg}`);
   } finally {
-    await Promise.all([load(), loadStats()]);
+    await Promise.all([load(), loadStats(true)]);
   }
 }
 
@@ -803,7 +827,7 @@ async function runNow() {
       body: JSON.stringify({ force: true }),
     });
     setTickStatusFromResponse(data);
-    await Promise.all([load(), loadStats()]);
+    await Promise.all([load(), loadStats(true)]);
   } catch (e) {
     const msg = errMessage(e);
     if (handleLockedError(msg)) return;
@@ -864,8 +888,8 @@ function render(records) {
     .join("");
 }
 
-async function loadStats() {
-  const data = await fetchJSON("/api/auto_trade/stats?sync=1");
+async function loadStats(sync = false) {
+  const data = await fetchJSON(`/api/auto_trade/stats?sync=${sync ? "1" : "0"}`);
   renderSummary(data?.stats || {});
 }
 
@@ -1059,7 +1083,7 @@ Promise.all([load(), loadStats()]).catch((e) => alert(e.message || e));
 refreshTimer = setInterval(() => {
   if (document.hidden) return;
   load().catch(() => {});
-  loadStats().catch(() => {});
+  loadStats(false).catch(() => {});
 }, 8000);
 window.addEventListener("beforeunload", () => {
   if (refreshTimer) clearInterval(refreshTimer);
@@ -1070,4 +1094,4 @@ collateralRefreshTimer = setInterval(() => {
   if (document.hidden) return;
   if (!binanceLinkActive) return;
   loadBinanceCollateral().catch(() => {});
-}, 10000);
+}, 30000);

@@ -248,6 +248,19 @@ _AUTO_AUDIT_TASKS: List[asyncio.Task] = []
 _AUTO_AUDIT_DROP_COUNT = 0
 _KST_OFFSET_MS = 9 * 60 * 60 * 1000
 _AUTO_LOG = logging.getLogger("coin.auto_trade")
+_AUTO_BINANCE_BAN_UNTIL_MS = 0
+_AUTO_COLLATERAL_CACHE_TTL_S = max(
+    10.0, float(str(os.getenv("AUTO_COLLATERAL_CACHE_TTL_S", "30")) or "30")
+)
+_AUTO_COLLATERAL_STALE_MAX_S = max(
+    _AUTO_COLLATERAL_CACHE_TTL_S,
+    float(str(os.getenv("AUTO_COLLATERAL_STALE_MAX_S", "180")) or "180"),
+)
+_AUTO_COLLATERAL_CACHE: Dict[int, Dict[str, Any]] = {}
+_AUTO_SPOT_PRICE_CACHE_TTL_S = max(
+    5.0, float(str(os.getenv("AUTO_SPOT_PRICE_CACHE_TTL_S", "20")) or "20")
+)
+_AUTO_SPOT_PRICE_CACHE: Dict[str, Any] = {"ts": 0.0, "map": {}}
 
 
 def _auth_expected_hash() -> str:
@@ -3395,6 +3408,58 @@ def _auto_binance_verify_target(market: str) -> tuple[str, str]:
     return BINANCE_SPOT_BASE_URL, "/api/v3/account"
 
 
+def _auto_parse_binance_ban_until_ms(text: str) -> int:
+    raw = str(text or "")
+    m = re.search(r"(?:until|해제)\s*([0-9]{10,16})", raw, flags=re.IGNORECASE)
+    if not m:
+        return 0
+    try:
+        ts = int(m.group(1))
+    except Exception:
+        return 0
+    return ts if ts > 0 else 0
+
+
+def _auto_is_binance_rate_limit_msg(text: str) -> bool:
+    t = str(text or "").lower()
+    if "-1003" in t:
+        return True
+    return "too much request weight" in t or "ip banned" in t or "rate limit" in t
+
+
+def _auto_binance_rate_limit_http(detail: str) -> HTTPException:
+    global _AUTO_BINANCE_BAN_UNTIL_MS
+    now_ms = int(time() * 1000)
+    until_ms = _auto_parse_binance_ban_until_ms(detail)
+    if until_ms <= now_ms:
+        until_ms = now_ms + 30_000
+    _AUTO_BINANCE_BAN_UNTIL_MS = max(int(_AUTO_BINANCE_BAN_UNTIL_MS), int(until_ms))
+    wait_s = max(1, int((_AUTO_BINANCE_BAN_UNTIL_MS - now_ms + 999) // 1000))
+    return HTTPException(
+        status_code=429,
+        detail=f"binance rate limit: {str(detail or '').strip()[:220]} (약 {wait_s}초 후 재시도)",
+    )
+
+
+def _auto_collateral_cache_get(user_id: int, *, max_age_s: float) -> Dict[str, Any] | None:
+    item = _AUTO_COLLATERAL_CACHE.get(int(user_id))
+    if not isinstance(item, dict):
+        return None
+    ts = float(item.get("ts", 0.0) or 0.0)
+    if ts <= 0:
+        return None
+    if (time() - ts) > float(max_age_s):
+        return None
+    payload = item.get("payload")
+    if not isinstance(payload, dict):
+        return None
+    return dict(payload)
+
+
+def _auto_collateral_cache_set(user_id: int, payload: Dict[str, Any]) -> None:
+    _AUTO_COLLATERAL_CACHE[int(user_id)] = {"ts": float(time()), "payload": dict(payload or {})}
+
+
 async def _auto_binance_signed_call(
     *,
     base_url: str,
@@ -3404,6 +3469,7 @@ async def _auto_binance_signed_call(
     method: str = "GET",
     extra_params: Dict[str, Any] | None = None,
 ) -> Any:
+    global _AUTO_BINANCE_BAN_UNTIL_MS
     key = str(api_key or "").strip()
     sec = str(api_secret or "").strip()
     if not key or not sec:
@@ -3411,6 +3477,10 @@ async def _auto_binance_signed_call(
     req_method = str(method or "GET").upper()
     if req_method not in {"GET", "POST", "DELETE"}:
         raise HTTPException(status_code=400, detail="unsupported binance method")
+    now_ms = int(time() * 1000)
+    if int(_AUTO_BINANCE_BAN_UNTIL_MS) > now_ms:
+        wait_s = max(1, int((int(_AUTO_BINANCE_BAN_UNTIL_MS) - now_ms + 999) // 1000))
+        raise HTTPException(status_code=429, detail=f"binance rate limit active ({wait_s}s)")
     timestamp = int(time() * 1000)
     params: Dict[str, Any] = {"timestamp": timestamp, "recvWindow": 5000}
     if isinstance(extra_params, dict):
@@ -3442,6 +3512,8 @@ async def _auto_binance_signed_call(
     except Exception:
         msg = str(r.text or "").strip()
     msg = msg[:220]
+    if _auto_is_binance_rate_limit_msg(msg):
+        raise _auto_binance_rate_limit_http(msg)
     raise HTTPException(status_code=400, detail=f"binance api 실패: {msg or 'invalid api key/secret'}")
 
 
@@ -3473,6 +3545,8 @@ async def _auto_verify_binance_credentials_both(*, api_key: str, api_secret: str
             await _auto_binance_signed_get(market=market, api_key=api_key, api_secret=api_secret)
         except HTTPException as e:
             detail = str(getattr(e, "detail", "")).strip() or "verification failed"
+            if int(getattr(e, "status_code", 0) or 0) == 429:
+                raise HTTPException(status_code=429, detail=f"{market}: {detail}")
             errors.append(f"{market}: {detail}")
     if errors:
         raise HTTPException(status_code=400, detail=" / ".join(errors))
@@ -4038,19 +4112,50 @@ def _auto_parse_collateral_from_account(*, market: str, body: Dict[str, Any]) ->
 
 
 async def _auto_fetch_spot_price_map() -> Dict[str, float]:
+    now_ts = float(time())
+    cached_map = _AUTO_SPOT_PRICE_CACHE.get("map")
+    cached_ts = float(_AUTO_SPOT_PRICE_CACHE.get("ts", 0.0) or 0.0)
+    if isinstance(cached_map, dict) and cached_map and (now_ts - cached_ts) <= _AUTO_SPOT_PRICE_CACHE_TTL_S:
+        return dict(cached_map)
+    if int(_AUTO_BINANCE_BAN_UNTIL_MS) > int(now_ts * 1000):
+        if isinstance(cached_map, dict) and cached_map:
+            return dict(cached_map)
+        wait_s = max(1, int((int(_AUTO_BINANCE_BAN_UNTIL_MS) - int(now_ts * 1000) + 999) // 1000))
+        raise HTTPException(status_code=429, detail=f"binance rate limit active ({wait_s}s)")
     path = "/api/v3/ticker/price"
     try:
         async with httpx.AsyncClient(base_url=BINANCE_SPOT_BASE_URL, timeout=8.0) as c:
             r = await c.get(path)
     except (httpx.ConnectTimeout, httpx.ReadTimeout, httpx.ConnectError, httpx.NetworkError):
+        if isinstance(cached_map, dict) and cached_map:
+            return dict(cached_map)
         raise HTTPException(status_code=502, detail="binance spot ticker request failed")
     if r.status_code >= 400:
+        msg = ""
+        try:
+            body = r.json()
+            if isinstance(body, dict):
+                code = body.get("code")
+                reason = str(body.get("msg", "")).strip()
+                msg = f"{code}: {reason}" if code is not None else reason
+        except Exception:
+            msg = str(r.text or "").strip()
+        if _auto_is_binance_rate_limit_msg(msg):
+            if isinstance(cached_map, dict) and cached_map:
+                return dict(cached_map)
+            raise _auto_binance_rate_limit_http(msg or f"spot ticker failed: {r.status_code}")
+        if isinstance(cached_map, dict) and cached_map:
+            return dict(cached_map)
         raise HTTPException(status_code=502, detail=f"binance spot ticker failed: {r.status_code}")
     try:
         rows = r.json()
     except Exception:
+        if isinstance(cached_map, dict) and cached_map:
+            return dict(cached_map)
         raise HTTPException(status_code=502, detail="binance spot ticker parse failed")
     if not isinstance(rows, list):
+        if isinstance(cached_map, dict) and cached_map:
+            return dict(cached_map)
         raise HTTPException(status_code=502, detail="binance spot ticker invalid response")
     out: Dict[str, float] = {}
     for row in rows:
@@ -4061,6 +4166,8 @@ async def _auto_fetch_spot_price_map() -> Dict[str, float]:
             continue
         if sym and math.isfinite(px) and px > 0:
             out[sym] = px
+    _AUTO_SPOT_PRICE_CACHE["ts"] = now_ts
+    _AUTO_SPOT_PRICE_CACHE["map"] = dict(out)
     return out
 
 
@@ -4205,8 +4312,11 @@ async def _auto_fetch_market_collateral(*, market: str, api_key: str, api_secret
             "unknown_assets": int(parsed.get("unknown_assets", 0) or 0),
             "asset_count": int(parsed.get("asset_count", 0) or 0),
             "error": "",
+            "rate_limited": False,
         }
     except HTTPException as e:
+        detail = str(getattr(e, "detail", "") or "request failed")
+        limited = int(getattr(e, "status_code", 0) or 0) == 429 or _auto_is_binance_rate_limit_msg(detail)
         return {
             "ok": False,
             "asset": "USDT",
@@ -4214,7 +4324,8 @@ async def _auto_fetch_market_collateral(*, market: str, api_key: str, api_secret
             "total_usdt": 0.0,
             "unknown_assets": 0,
             "asset_count": 0,
-            "error": str(getattr(e, "detail", "") or "request failed"),
+            "error": detail,
+            "rate_limited": bool(limited),
         }
 
 
@@ -4238,8 +4349,11 @@ async def _auto_fetch_funding_collateral(*, api_key: str, api_secret: str) -> Di
             "unknown_assets": int(parsed.get("unknown_assets", 0) or 0),
             "asset_count": int(parsed.get("asset_count", 0) or 0),
             "error": "",
+            "rate_limited": False,
         }
     except HTTPException as e:
+        detail = str(getattr(e, "detail", "") or "request failed")
+        limited = int(getattr(e, "status_code", 0) or 0) == 429 or _auto_is_binance_rate_limit_msg(detail)
         return {
             "ok": False,
             "asset": "USDT",
@@ -4247,11 +4361,15 @@ async def _auto_fetch_funding_collateral(*, api_key: str, api_secret: str) -> Di
             "total_usdt": 0.0,
             "unknown_assets": 0,
             "asset_count": 0,
-            "error": str(getattr(e, "detail", "") or "request failed"),
+            "error": detail,
+            "rate_limited": bool(limited),
         }
 
 
 async def _auto_fetch_binance_collateral(user_id: int) -> Dict[str, Any]:
+    fresh_cache = _auto_collateral_cache_get(int(user_id), max_age_s=_AUTO_COLLATERAL_CACHE_TTL_S)
+    if isinstance(fresh_cache, dict):
+        return fresh_cache
     row = await _auto_get_binance_link_row(user_id)
     if not isinstance(row, dict):
         raise HTTPException(status_code=404, detail="binance link not found")
@@ -4266,11 +4384,20 @@ async def _auto_fetch_binance_collateral(user_id: int) -> Dict[str, Any]:
         _auto_fetch_market_collateral(market="futures", api_key=api_key, api_secret=api_secret),
         _auto_fetch_funding_collateral(api_key=api_key, api_secret=api_secret),
     )
+    rate_limited = bool(spot.get("rate_limited")) or bool(fut.get("rate_limited")) or bool(funding.get("rate_limited"))
+    if rate_limited:
+        stale_cache = _auto_collateral_cache_get(int(user_id), max_age_s=_AUTO_COLLATERAL_STALE_MAX_S)
+        if isinstance(stale_cache, dict):
+            stale_cache["stale"] = True
+            stale_cache["rate_limited"] = True
+            stale_cache["updated_ms"] = int(time() * 1000)
+            return stale_cache
     if not bool(spot.get("ok")) and not bool(fut.get("ok")) and not bool(funding.get("ok")):
         spot_err = str(spot.get("error", "")).strip() or "failed"
         fut_err = str(fut.get("error", "")).strip() or "failed"
         fund_err = str(funding.get("error", "")).strip() or "failed"
-        raise HTTPException(status_code=400, detail=f"spot: {spot_err} / futures: {fut_err} / funding: {fund_err}")
+        status_code = 429 if rate_limited else 400
+        raise HTTPException(status_code=status_code, detail=f"spot: {spot_err} / futures: {fut_err} / funding: {fund_err}")
     total_available = 0.0
     total_balance = 0.0
     total_assets = 0
@@ -4280,7 +4407,7 @@ async def _auto_fetch_binance_collateral(user_id: int) -> Dict[str, Any]:
         total_available += float(item.get("available_usdt", 0.0) or 0.0)
         total_balance += float(item.get("total_usdt", 0.0) or 0.0)
         total_assets += int(item.get("asset_count", 0) or 0)
-    return {
+    out = {
         "asset": "USDT",
         "spot": spot,
         "futures": fut,
@@ -4289,7 +4416,11 @@ async def _auto_fetch_binance_collateral(user_id: int) -> Dict[str, Any]:
         "total_usdt": round(total_balance, 4),
         "asset_count": int(total_assets),
         "updated_ms": int(time() * 1000),
+        "stale": False,
+        "rate_limited": False,
     }
+    _auto_collateral_cache_set(int(user_id), out)
+    return out
 
 
 async def _auto_upsert_binance_link(user_id: int, *, api_key: str, api_secret: str) -> Dict[str, Any]:
@@ -4698,9 +4829,20 @@ async def api_auto_trade_upsert_binance_link(
     api_secret = str(payload.get("api_secret", "")).strip()
     if len(api_key) < 12 or len(api_secret) < 12:
         raise HTTPException(status_code=400, detail="api_key/api_secret length is too short")
-    await _auto_verify_binance_credentials_both(api_key=api_key, api_secret=api_secret)
+    verify_skipped = False
+    try:
+        await _auto_verify_binance_credentials_both(api_key=api_key, api_secret=api_secret)
+    except HTTPException as e:
+        if int(getattr(e, "status_code", 0) or 0) == 429:
+            verify_skipped = True
+        else:
+            raise
     row = await _auto_upsert_binance_link(user_id, api_key=api_key, api_secret=api_secret)
-    return {"ok": True, "link": _auto_public_binance_link(row)}
+    return {
+        "ok": True,
+        "link": _auto_public_binance_link(row),
+        "verify_skipped": verify_skipped,
+    }
 
 
 @app.delete("/api/auto_trade/binance/link")
