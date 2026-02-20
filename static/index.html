@@ -123,7 +123,7 @@
                 <div class="prob-value" id="sellPct">-</div>
               </div>
               <div class="prob-item">
-                <div class="prob-label">신뢰도 <span class="tip" tabindex="0" data-tip="1) 지표가 같은 방향일수록 상승&#10;2) 높을수록 신호 일치도 큼&#10;3) PASS 최소선은 레짐별로 다름(추세 30% / 횡보 36% / 고변동 42%)&#10;4) 45%+: 비교적 강한 신호">?</span></div>
+                <div class="prob-label">신뢰도 <span class="tip" tabindex="0" data-tip="1) 지표가 같은 방향일수록 상승&#10;2) 높을수록 신호 일치도 큼&#10;3) 최종 진입은 신뢰도 단독이 아니라 신호 점수(기본 70 / 공격 58)와 함께 판단&#10;4) 45%+: 비교적 강한 신호">?</span></div>
                 <div class="prob-value" id="confidence">-</div>
               </div>
               <div class="prob-item">
@@ -162,20 +162,20 @@
               <div class="entry-info-line"><strong>하락 스윙 (H→L):</strong> 고점→저점 기준으로 피보 반등 되돌림 레벨 표시</div>
             </div>
             <div class="decision-box">
-              <div class="decision-title">진입 판단 순서: 확률 → 피보 구간 → 실행</div>
+              <div class="decision-title">자동매매와 동일 로직: 신호 점수 → 피보나치 기반 체결 → 실행/안전필터</div>
               <div class="decision-steps">
                 <div class="decision-step">
-                  <div class="decision-step-k">1) 확률 판단</div>
+                  <div class="decision-step-k">1) 신호 점수</div>
                   <div class="decision-step-s" id="stepProbStatus">-</div>
                   <div class="decision-step-v" id="stepProbDetail">-</div>
                 </div>
                 <div class="decision-step">
-                  <div class="decision-step-k">2) 피보 구간 확인</div>
+                  <div class="decision-step-k">2) 피보나치 기반 체결</div>
                   <div class="decision-step-s" id="stepFibStatus">-</div>
                   <div class="decision-step-v" id="stepFibDetail">-</div>
                 </div>
                 <div class="decision-step">
-                  <div class="decision-step-k">3) 실행 판단</div>
+                  <div class="decision-step-k">3) 실행/안전필터</div>
                   <div class="decision-step-s" id="stepExecStatus">-</div>
                   <div class="decision-step-v" id="stepExecDetail">-</div>
                 </div>

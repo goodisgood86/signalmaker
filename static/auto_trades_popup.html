@@ -1100,16 +1100,19 @@
           </div>
           <div class="logic-block">
             <div class="logic-k">매수/매도 진입 조건</div>
-            <div class="logic-v">기본모드: 확률 PASS(pass_prob + pass_regime)일 때만 방향을 채택합니다.
-공격모드: PASS 여부와 관계없이 매수/매도 확률 중 우세값이 60% 이상일 때 진입 후보가 됩니다.
-공격모드 추가 제한: 피보 스윙 방향과 시그널 방향이 다르면 미진입합니다.
+            <div class="logic-v">기본모드/공격모드 공통: 확률·신뢰도·레짐·스윙·거래량을 합산한 신호점수를 계산합니다.
+기본모드 기준점수: 70점, 공격모드 기준점수: 58점.
+공격모드는 기준점수만 완화하며, 안전필터(담보/일손실/손절무효/스팟 숏금지)는 동일하게 유지합니다.
+하락 스윙 예외: 바닥(0.0~0.236) 터치 후 반전 확인(종가 회복 + 매수우위 + 신뢰도) 시 반전 롱을 허용합니다.
 스팟 마켓은 숏(SELL 진입)을 허용하지 않습니다.</div>
           </div>
           <div class="logic-block">
             <div class="logic-k">피보나치 기반 체결</div>
-            <div class="logic-v">1) 진입: 계산된 피보 진입가를 현재 봉 고저/종가 기준으로 터치하면 체결 처리합니다.
+            <div class="logic-v">1) 진입: 단일 진입가가 아닌 피보 진입구간(entry_lo~entry_hi) 터치 시 체결 처리합니다.
 2) 손절: 자동 모드면 피보 손절가, 수동 모드면 입력 % 기준 손절가를 사용합니다.
-3) 익절: 자동 모드면 피보 TP1/TP2, 수동 모드면 입력 %를 TP1=TP2로 사용합니다.</div>
+3) 익절: 자동 모드면 피보 TP1/TP2, 수동 모드면 입력 %를 TP1=TP2로 사용합니다.
+4) 보호조건: 손절 무효구간 진입, 구간 과이탈, 과도한 추격, 최소 RR 미달 시 신규 진입을 건너뜁니다.
+5) 반전 롱은 하락 스윙에서 확인봉 조건을 만족할 때만 실행합니다.</div>
           </div>
           <div class="logic-block">
             <div class="logic-k">청산 규칙</div>
@@ -1121,15 +1124,17 @@
             <div class="logic-k">실거래 보호 처리</div>
             <div class="logic-v">1) 진입 체결 후 거래소 보호손절 주문을 생성합니다.
 2) 보호주문 실패 시 즉시 반대 시장가 청산을 시도하고 자동매매를 비활성화합니다.
-3) 부분청산 후 남은 수량 기준으로 보호손절 주문을 재생성합니다.</div>
+3) 스팟은 STOP_LOSS(시장가 트리거), 선물은 STOP_MARKET(reduceOnly)로 보호주문을 운영합니다.
+4) 부분청산 후 남은 수량 기준으로 보호손절 주문을 재생성합니다.</div>
           </div>
           <div class="logic-block">
             <div class="logic-k">운영 참고</div>
-            <div class="logic-v">백그라운드 tick 주기 기본값은 15초이며, 일손실 기준은 KST 일자 기준(실현손익만)으로 집계됩니다.</div>
+            <div class="logic-v">백그라운드 tick 주기 기본값은 15초이며, 일손실 기준은 KST 일자 기준(실현손익만)으로 집계됩니다.
+자동매매 진입 판단 가격은 WebSocket 수신값을 우선 사용하고, 없으면 최신 캔들 종가를 사용합니다.</div>
           </div>
         </div>
       </div>
     </div>
-    <script src="/static/auto_trades_popup.js?v=20260220ba"></script>
+    <script src="/static/auto_trades_popup.js?v=20260220be"></script>
   </body>
 </html>

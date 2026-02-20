@@ -1829,6 +1829,29 @@ function hasEntryReaction(side, entryLo, entryHi, klines) {
   return false;
 }
 
+function calcSignalScore({ rawDiff, conf, regime, side, lowVolumeBlock, swingConflict, reversalReady }) {
+  const edge = Math.abs(Number(rawDiff) || 0);
+  const edgeScore = Math.max(0, Math.min(30, (edge / 20) * 30));
+  const c = Number(conf);
+  const confScore = Number.isFinite(c) ? Math.max(0, Math.min(25, (c / 0.6) * 25)) : 0;
+  const r = String(regime || "").toUpperCase();
+  const regimeScore = r === "TREND" ? 15 : r === "RANGE" ? 11 : r === "HIGH_VOL" ? 7 : 10;
+  const s = String(side || "").toUpperCase();
+  const sideScore = s === "BUY" || s === "SELL" ? 15 : 0;
+  const fibScore = reversalReady ? 10 : swingConflict ? 0 : 4;
+  const momentumScore = lowVolumeBlock ? 1 : 5;
+  const total = edgeScore + confScore + regimeScore + sideScore + fibScore + momentumScore;
+  return {
+    total: Math.max(0, Math.min(100, total)),
+    edge: edgeScore,
+    conf: confScore,
+    regime: regimeScore,
+    side: sideScore,
+    fib: fibScore,
+    momentum: momentumScore,
+  };
+}
+
 function renderActionSummary(analysis, fibPlan) {
   if (!actionBadgeEl || !actionTitleEl || !actionSubtitleEl) return;
 
@@ -1853,25 +1876,27 @@ function renderActionSummary(analysis, fibPlan) {
   const tp2GapPct = Math.min(0.07, Math.max(0.022, atrPct * 2.4));
   const stopGapPct = Math.min(0.028, Math.max(0.007, atrPct * 0.9));
 
-  let side = "WAIT";
-  if (diff >= params.sideStrong || (diff >= params.sideWeak && conf >= params.confWeak)) side = "BUY";
-  else if (diff <= -params.sideStrong || (diff <= -params.sideWeak && conf >= params.confWeak)) side = "SELL";
+  let sideSignal = "WAIT";
+  if (diff >= params.sideStrong || (diff >= params.sideWeak && conf >= params.confWeak)) sideSignal = "BUY";
+  else if (diff <= -params.sideStrong || (diff <= -params.sideWeak && conf >= params.confWeak)) sideSignal = "SELL";
   const mtfBias = mtfBiasFromAnalysis(analysis);
   const mtfConflict = !mtfBias.aligned;
-  if (mtfBias.aligned && mtfBias.side && side !== "WAIT" && side !== mtfBias.side) side = "WAIT";
-  if (mtfConflict) side = "WAIT";
+  if (mtfBias.aligned && mtfBias.side && sideSignal !== "WAIT" && sideSignal !== mtfBias.side) sideSignal = "WAIT";
+  if (mtfConflict) sideSignal = "WAIT";
 
-  // 확률 방향과 피보 스윙이 충돌하면 실행 관점에서는 관망으로 강등
+  let side = sideSignal;
+  // 스윙 충돌은 기본적으로 대기, 단 반전 바닥 롱 조건 충족 시 예외 허용한다.
   let swingConflict = false;
   if (hasFibSwing) {
-    if (swingUp && side === "SELL") swingConflict = true;
-    if (!swingUp && side === "BUY") swingConflict = true;
+    if (swingUp && sideSignal === "SELL") swingConflict = true;
+    if (!swingUp && sideSignal === "BUY") swingConflict = true;
     if (swingConflict) side = "WAIT";
   }
 
   // 신뢰도가 극단적으로 낮으면 방향 차이가 커도 관망으로 처리한다.
-  if (conf < params.confFloor) side = "WAIT";
-  if (regime === "HIGH_VOL" && conf < params.passRegimeConf && Math.abs(diff) < params.passRegimeDiff) side = "WAIT";
+  if (conf < params.confFloor) sideSignal = "WAIT";
+  if (regime === "HIGH_VOL" && conf < params.passRegimeConf && Math.abs(diff) < params.passRegimeDiff) sideSignal = "WAIT";
+  if (sideSignal === "WAIT") side = "WAIT";
   setTradeLabels();
 
   if (side === "BUY") {
@@ -1942,7 +1967,12 @@ function renderActionSummary(analysis, fibPlan) {
   let target2Hi = NaN;
   let stopPx = NaN;
   let reactionPass = side !== "BUY";
+  let reversalCandidate = false;
+  let reversalReady = false;
+  let reversalOverride = false;
   const lowVolumeBlock = String(latestVolumeStates?.["5m"] || latestVolumeStates?.single || "").includes("평균 이하");
+  const scoreThresholdBase = 70;
+  const scoreThresholdAggressive = 58;
 
   if (fibPlan && Number.isFinite(close)) {
     const buyP = Number(fibPlan.buyPrice);
@@ -2085,31 +2115,30 @@ function renderActionSummary(analysis, fibPlan) {
     }
   }
 
+  if (fibPlan && !fibPlan.isUpMove && Number.isFinite(entryLo) && Number.isFinite(entryHi) && Number.isFinite(close)) {
+    reversalCandidate = buy > sell && conf >= Math.max(params.confFloor, 0.26);
+    const reversalReaction = hasEntryReaction("BUY", entryLo, entryHi, latestDecisionKlines);
+    reversalReady = reversalCandidate && reversalReaction && close >= entryHi;
+    if (swingConflict && reversalReady) {
+      side = "BUY";
+      swingConflict = false;
+      reversalOverride = true;
+      reactionPass = true;
+      actionBadgeEl.textContent = "반전 롱 후보";
+      actionBadgeEl.className = "action-badge buy";
+      actionTitleEl.textContent = "하락 스윙 바닥권에서 반전 롱 조건이 확인됐습니다.";
+      actionSubtitleEl.textContent = "0.0~0.236 터치 후 0.236 위 종가 회복 + 매수 우위 + 신뢰도 조건 충족";
+    }
+  }
+
   entryZoneEl.textContent = entryTxt;
   targetZoneEl.textContent = targetTxt;
   stopZoneEl.textContent = stopTxt;
   if (entryFibLevelsEl) entryFibLevelsEl.textContent = fibLevelsTxt;
   if (entryFibZonesEl) entryFibZonesEl.textContent = fibZonesTxt;
   const isHighVol = regime === "HIGH_VOL";
-  const passProb =
-    (side === "BUY" && buy >= params.probMinPct && conf >= params.probMinConf && (conf >= params.probSoftConf || diff >= params.sideStrong)) ||
-    (side === "SELL" && sell >= params.probMinPct && conf >= params.probMinConf && (conf >= params.probSoftConf || diff <= -params.sideStrong));
   const swingBiasTxt =
     hasFibSwing && Math.abs(swingBias) > 0 ? `${swingBias > 0 ? "+" : ""}${swingBias.toFixed(1)}%p` : "없음";
-  let passProbReason = "";
-  if (!passProb) {
-    if (side === "WAIT") {
-      passProbReason = "방향 우위 미확정";
-    } else if (side === "BUY" && buy < params.probMinPct) {
-      passProbReason = `매수 확률 ${buy.toFixed(2)}% < 기준 ${params.probMinPct}%`;
-    } else if (side === "SELL" && sell < params.probMinPct) {
-      passProbReason = `하락 확률 ${sell.toFixed(2)}% < 기준 ${params.probMinPct}%`;
-    } else if (conf < params.probMinConf) {
-      passProbReason = `신뢰도 ${(conf * 100).toFixed(1)}% < 기준 ${(params.probMinConf * 100).toFixed(0)}%`;
-    } else {
-      passProbReason = "강도 조건(soft/strong) 미충족";
-    }
-  }
   const passRegime = !isHighVol || conf >= params.passRegimeConf || Math.abs(diff) >= params.passRegimeDiff;
   const fibTol = Number.isFinite(close) ? close * params.fibTolPct : 0;
   const passFib =
@@ -2121,20 +2150,41 @@ function renderActionSummary(analysis, fibPlan) {
   if (side === "BUY") {
     reactionPass = hasEntryReaction("BUY", entryLo, entryHi, latestDecisionKlines);
   }
-  setStepStatus(stepProbStatusEl, passProb);
+  let scoreSide = side;
+  if (reversalReady && scoreSide === "WAIT") scoreSide = "BUY";
+  const scoreSwingConflict = swingConflict && !reversalReady;
+  const signalScore = calcSignalScore({
+    rawDiff,
+    conf,
+    regime,
+    side: scoreSide,
+    lowVolumeBlock,
+    swingConflict: scoreSwingConflict,
+    reversalReady,
+  });
+  const passSignalBase = signalScore.total >= scoreThresholdBase;
+  const passSignalAgg = signalScore.total >= scoreThresholdAggressive;
+  const passSignal = passSignalBase || passSignalAgg;
+  setStepStatus(stepProbStatusEl, passSignal);
   if (stepProbDetailEl) {
     const sidePct = side === "SELL" ? sell : buy;
     const sideLabel = side === "SELL" ? "하락" : "매수";
-    if (swingConflict) {
+    if (swingConflict && !reversalOverride) {
       stepProbDetailEl.textContent = `확률: 매수 ${buy.toFixed(2)}% / 하락 ${sell.toFixed(2)}% | 신뢰도 ${(conf * 100).toFixed(
         1
-      )}%\n상태: 확률-스윙 충돌(실행 대기)`;
+      )}%\n상태: 스윙 정방향 불일치(하락 스윙 예외 미충족)`;
     } else {
       const lines = [
         `방향: ${sideLabel} ${sidePct.toFixed(2)}% (보정 ${swingBiasTxt}) | 신뢰도 ${(conf * 100).toFixed(1)}% | 레짐: ${regimeTxt}`,
-        `PASS 기준: 확률 ${params.probMinPct}%+ · 신뢰도 ${(params.probMinConf * 100).toFixed(0)}%+`,
+        `점수: ${signalScore.total.toFixed(1)} / 100 (기본 ${scoreThresholdBase}, 공격 ${scoreThresholdAggressive})`,
+        `구성: Edge ${signalScore.edge.toFixed(1)} · Conf ${signalScore.conf.toFixed(1)} · Regime ${signalScore.regime.toFixed(
+          1
+        )} · Side ${signalScore.side.toFixed(1)} · Fib ${signalScore.fib.toFixed(1)} · 모멘텀 ${signalScore.momentum.toFixed(1)}`,
+        "규칙: 공격모드는 기준점수만 완화, 안전필터(담보/일손실/손절무효/스팟 숏금지)는 동일 적용",
       ];
-      if (!passProb) lines.push(`미통과: ${passProbReason}`);
+      if (!passSignal) lines.push("미통과: 신호 점수 부족");
+      if (passSignalAgg && !passSignalBase) lines.push("참고: 공격모드 기준점수(58)에서만 통과");
+      if (reversalReady) lines.push("하락 스윙 예외 충족: 바닥(0.0~0.236) 터치 후 종가 회복 + 매수우위 + 신뢰도");
       stepProbDetailEl.textContent = lines.join("\n");
     }
   }
@@ -2142,10 +2192,10 @@ function renderActionSummary(analysis, fibPlan) {
   if (stepFibDetailEl) {
     stepFibDetailEl.textContent =
       Number.isFinite(entryLo) && Number.isFinite(entryHi)
-        ? `현재가: ${formatPrice(close)}\n진입구간: ${formatPrice(entryLo)} ~ ${formatPrice(entryHi)} USDT\n허용오차: ±${formatPrice(
+        ? `현재가: ${formatPrice(close)}\n피보 진입구간(entry_lo~entry_hi): ${formatPrice(entryLo)} ~ ${formatPrice(entryHi)} USDT\n허용오차: ±${formatPrice(
             fibTol
           )}`
-        : "진입구간 계산 대기";
+        : "피보 진입구간 계산 대기";
   }
   const entryMid = zoneMid(entryLo, entryHi);
   const targetMid = zoneMid(targetLo, targetHi);
@@ -2161,9 +2211,10 @@ function renderActionSummary(analysis, fibPlan) {
     Number.isFinite(stopPx) &&
     targetMid > entryMid * (1 + minTpPass) &&
     stopPx < entryMid * (1 - minStopPass) &&
-    (!Number.isFinite(rr) || rr >= 0.9);
-
-  const passExec = passProb && passRegime && passFib && passPlan && reactionPass && !lowVolumeBlock;
+      (!Number.isFinite(rr) || rr >= 0.9);
+  const passExecBase = passSignalBase && passRegime && passFib && passPlan && reactionPass && !lowVolumeBlock;
+  const passExecAgg = passSignalAgg && passRegime && passFib && passPlan && reactionPass && !lowVolumeBlock;
+  const passExec = passExecBase || passExecAgg;
   if (entryPlanMetricsEl) {
     if (Number.isFinite(entryMid) && Number.isFinite(targetMid) && Number.isFinite(stopPx) && entryMid > 0) {
       const upPct = ((targetMid / entryMid) - 1) * 100;
@@ -2183,31 +2234,41 @@ function renderActionSummary(analysis, fibPlan) {
       .replace("1차 익절:", "1차 익절 :")
       .replace("2차 익절:", "2차 익절 :");
     if (passExec) {
-      stepExecDetailEl.textContent = `진입 기준가: ${entryTxt}\n${tpExecTxt}\n손절가: ${stopTxt}`;
+      const modeHint = passExecBase ? "기본/공격 공통 통과" : "공격모드 점수 기준 통과";
+      stepExecDetailEl.textContent = `진입: 피보 진입구간(entry_lo~entry_hi) 터치 시 체결\n진입 기준가: ${entryTxt}\n${tpExecTxt}\n손절가: ${stopTxt}\n실행모드: ${modeHint}`;
     } else if (lowVolumeBlock) {
-      stepExecDetailEl.textContent = "실행 대기\n사유: 거래량 평균 이하";
+      stepExecDetailEl.textContent = "실행 대기\n사유: 모멘텀 약화(거래량 평균 이하)";
     } else if (!reactionPass) {
-      stepExecDetailEl.textContent = "실행 대기\n사유: 진입 반응 확인 미충족";
+      stepExecDetailEl.textContent = reversalCandidate
+        ? "실행 대기\n사유: 하락 스윙 예외 확인봉 조건 미충족"
+        : "실행 대기\n사유: 진입구간 터치 후 확인봉 조건 미충족";
     } else if (!passPlan) {
-      stepExecDetailEl.textContent = "실행 대기\n사유: 진입/익절/손절 간격이 비합리적(RR/거리)";
+      stepExecDetailEl.textContent = "실행 대기\n사유: 안전필터 미충족(RR/거리)";
     } else {
-      stepExecDetailEl.textContent = "실행 대기\n사유: 확률 또는 피보 조건 미충족";
+      stepExecDetailEl.textContent = "실행 대기\n사유: 신호점수 또는 피보 진입구간 조건 미충족";
     }
   }
   if (decisionFinalEl) {
-    if (swingConflict) {
+    if (swingConflict && !reversalOverride) {
       if (stepFinalStatusEl) setStepStatus(stepFinalStatusEl, false);
-      decisionFinalEl.textContent = "확률/스윙 충돌로 관망";
+      decisionFinalEl.textContent = "하락 스윙 예외 미충족으로 진입 보류";
     } else if (passExec && side === "BUY") {
       if (stepFinalStatusEl) setStepStatus(stepFinalStatusEl, true);
-      decisionFinalEl.textContent = "분할 진입 가능 구간";
-    } else if (side === "SELL" && passProb && passRegime) {
+      decisionFinalEl.textContent = reversalOverride
+        ? "하락 스윙 예외 충족: 반전 롱 실행 가능 구간"
+        : "피보 진입구간 터치 시 분할 진입 가능 구간";
+    } else if (side === "SELL" && passSignal && passRegime) {
       if (stepFinalStatusEl) setStepStatus(stepFinalStatusEl, true);
       decisionFinalEl.textContent = "현물 기준 비중축소/관망 우선";
-    } else if (passProb && passRegime && !passFib) {
+    } else if (passSignal && passRegime && !passFib) {
       if (stepFinalStatusEl) setStepStatus(stepFinalStatusEl, false);
       decisionFinalEl.textContent =
-        side === "SELL" ? "방향은 하락 우세, 가격이 진입구간 도달 대기" : "방향은 매수 우위, 진입가는 피보 구간 도달 대기";
+        side === "SELL"
+          ? "하락 우세: 피보 진입구간(entry_lo~entry_hi) 도달 대기"
+          : "매수 우위: 피보 진입구간(entry_lo~entry_hi) 도달 대기";
+    } else if (passSignalAgg && !passSignalBase) {
+      if (stepFinalStatusEl) setStepStatus(stepFinalStatusEl, false);
+      decisionFinalEl.textContent = "공격모드 기준점수(58) 통과, 기본모드 기준점수(70)는 대기";
     } else if (side === "SELL") {
       if (stepFinalStatusEl) setStepStatus(stepFinalStatusEl, false);
       decisionFinalEl.textContent = "현물 기준 신규매수보다 비중축소/관망 우선";
@@ -2245,13 +2306,19 @@ function renderActionSummary(analysis, fibPlan) {
   if (decisionFinalEl && !fibPlan) decisionFinalEl.textContent = "데이터 대기";
   if (passCheckSummaryEl && !fibPlan) setPassCheckUI("pending");
   if (actionExplainEl) {
+    const setupTxt = reversalOverride ? "반전 바닥 롱" : side === "BUY" ? "추세/반등 롱" : side === "SELL" ? "하락 우세" : "관망";
     actionExplainEl.textContent =
       `[현재 값]\n` +
       `- 매수 ${buy.toFixed(2)}% / 매도 ${sell.toFixed(2)}% (원차이 ${rawDiff >= 0 ? "+" : ""}${rawDiff.toFixed(2)}%p, 피보보정 ${
         swingBias >= 0 ? "+" : ""
       }${swingBias.toFixed(2)}%p, 반영차이 ${diff >= 0 ? "+" : ""}${diff.toFixed(2)}%p)\n` +
       `- 신뢰도 ${(conf * 100).toFixed(1)}% (지표 일치도)\n` +
-      `- 레짐 ${regimeTxt} (${regime || "-"})\n\n` +
+      `- 레짐 ${regimeTxt} (${regime || "-"})\n` +
+      `- 신호점수 ${signalScore.total.toFixed(1)}점 (기본 ${scoreThresholdBase} / 공격 ${scoreThresholdAggressive})\n` +
+      `- 점수구성 Edge ${signalScore.edge.toFixed(1)} / Conf ${signalScore.conf.toFixed(1)} / Regime ${signalScore.regime.toFixed(
+        1
+      )} / Side ${signalScore.side.toFixed(1)} / Fib ${signalScore.fib.toFixed(1)} / 모멘텀 ${signalScore.momentum.toFixed(1)}\n` +
+      `- 셋업 ${setupTxt}\n\n` +
       `[왜 이렇게 나왔나]\n` +
       `- 주요 반영값: ${topTxt}\n` +
       `- 피보 요약: ${fibMeaning || "-"}\n\n` +

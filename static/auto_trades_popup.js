@@ -132,29 +132,81 @@ function fmtTs(ms) {
 function fibPlanStatusText(plan) {
   if (!plan || typeof plan !== "object") return "";
   const entry = fmtPrice(plan?.entry_price);
+  const entryLo = fmtPrice(plan?.entry_lo);
+  const entryHi = fmtPrice(plan?.entry_hi);
   const stop = fmtPrice(plan?.stop_price);
   const tp1 = fmtPrice(plan?.tp1_price);
   const tp2 = fmtPrice(plan?.tp2_price);
-  if ([entry, stop, tp1, tp2].some((v) => v === "-")) return "";
-  return `피보 진입 ${entry} / 손절 ${stop} / 익절 ${tp1}~${tp2}`;
+  if ([stop, tp1, tp2].some((v) => v === "-")) return "";
+  let entryText = entry;
+  if (entryLo !== "-" && entryHi !== "-") entryText = `${entryLo}~${entryHi}`;
+  if (entryText === "-") return "";
+  return `피보 진입 ${entryText} / 손절 ${stop} / 익절 ${tp1}~${tp2}`;
+}
+
+function signalStatusText(signal) {
+  if (!signal || typeof signal !== "object") return "";
+  const buy = Number(signal?.buy_pct);
+  const sell = Number(signal?.sell_pct);
+  const conf = Number(signal?.confidence);
+  const score = Number(signal?.score);
+  const scoreThreshold = Number(signal?.score_threshold);
+  const parts = [];
+  if (Number.isFinite(buy) && Number.isFinite(sell)) parts.push(`B${buy.toFixed(1)} / S${sell.toFixed(1)}`);
+  if (Number.isFinite(conf)) parts.push(`신뢰도 ${(conf * 100).toFixed(1)}%`);
+  if (Number.isFinite(score) && Number.isFinite(scoreThreshold)) parts.push(`점수 ${score.toFixed(1)} / 기준 ${scoreThreshold.toFixed(0)}`);
+  return parts.join(" | ");
 }
 
 function setTickStatusFromResponse(data) {
   const action = String(data?.action || "");
   const reason = String(data?.reason || "");
   const planText = fibPlanStatusText(data?.plan);
+  const sigText = signalStatusText(data?.signal);
+  const append = (base) => {
+    const pieces = [base];
+    if (planText) pieces.push(planText);
+    if (sigText) pieces.push(sigText);
+    return pieces.join(" | ");
+  };
   if (action === "OPENED") {
     setCfgStatus("자동매매 진입 실행됨");
     return;
   }
   if (action === "NO_SIGNAL") {
-    const base = reason === "BASIC_PASS_FAIL" ? "자동매매 대기: 확률 미PASS" : "자동매매 대기: 진입 신호 없음";
-    setCfgStatus(planText ? `${base} | ${planText}` : base);
+    const rrVal = Number(data?.rr);
+    const minRrVal = Number(data?.min_rr);
+    const rrText =
+      Number.isFinite(rrVal) && Number.isFinite(minRrVal) ? `RR ${rrVal.toFixed(2)} < 최소 ${minRrVal.toFixed(2)}` : "";
+    const base =
+      reason === "SIGNAL_SCORE_LOW"
+        ? "자동매매 대기: 신호 점수 미달"
+        : reason === "SIGNAL_SIDE_WAIT"
+          ? "자동매매 대기: 방향 우위 미확정"
+          : reason === "REVERSAL_NOT_READY"
+            ? "자동매매 대기: 바닥 반전 확인 미완료"
+      : reason === "BASIC_PASS_FAIL"
+        ? "자동매매 대기: 확률 미PASS"
+        : reason === "SWING_MISMATCH"
+          ? "자동매매 대기: 스윙 방향 불일치"
+          : reason === "AGGRESSIVE_THRESHOLD"
+            ? "자동매매 대기: 공격모드 진입 점수 미달"
+          : reason === "ENTRY_ZONE_BREAK"
+            ? "자동매매 대기: 진입구간 하단 이탈(재계산 대기)"
+          : reason === "ENTRY_CHASE_LIMIT"
+            ? "자동매매 대기: 추격 진입 제한"
+            : reason === "RR_TOO_LOW"
+              ? "자동매매 대기: 기대 RR 부족"
+        : reason === "PLAN_INVALIDATED"
+          ? "자동매매 대기: 기존 피보 시나리오 무효 (재계산 대기)"
+          : "자동매매 대기: 진입 신호 없음";
+    const full = append(base);
+    setCfgStatus(rrText ? `${full} | ${rrText}` : full);
     return;
   }
   if (action === "WAIT_FIB_ENTRY") {
     const base = "자동매매 대기: 피보나치 진입가 대기";
-    setCfgStatus(planText ? `${base} | ${planText}` : base);
+    setCfgStatus(append(base));
     return;
   }
   if (action === "SKIP_DAILY_LOSS_LIMIT") {
