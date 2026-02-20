@@ -43,6 +43,36 @@ from .scoring import score_signal, score_signal_trendy
 from .volume_profile import compute_volume_profile
 
 
+def _load_local_ops_env_if_present() -> None:
+    env_path = Path("configs/ops.env")
+    if not env_path.exists() or not env_path.is_file():
+        return
+    try:
+        lines = env_path.read_text(encoding="utf-8").splitlines()
+    except Exception:
+        return
+    for raw_line in lines:
+        line = str(raw_line or "").strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[7:].strip()
+        if "=" not in line:
+            continue
+        k, v = line.split("=", 1)
+        key = str(k or "").strip()
+        if not key:
+            continue
+        val = str(v or "").strip()
+        if len(val) >= 2 and ((val.startswith("'") and val.endswith("'")) or (val.startswith('"') and val.endswith('"'))):
+            val = val[1:-1]
+        if key not in os.environ:
+            os.environ[key] = val
+
+
+_load_local_ops_env_if_present()
+
+
 def _klines_to_df(klines: List[Any]) -> pd.DataFrame:
     rows = []
     for k in klines:
