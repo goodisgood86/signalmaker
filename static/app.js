@@ -143,6 +143,16 @@ function initCoinListInteractionGuard() {
   }
 }
 
+function isLikelyMobileBrowser() {
+  const ua = String(navigator?.userAgent || "");
+  return /Android|iPhone|iPad|iPod|Mobile|Windows Phone/i.test(ua);
+}
+
+function updateDesktopModeClass() {
+  const desktop = !isLikelyMobileBrowser();
+  document.body.classList.toggle("desktop-mode", desktop);
+}
+
 function findScrollHost(el) {
   let p = el ? el.parentElement : null;
   while (p && p !== document.body && p !== document.documentElement) {
@@ -2594,6 +2604,8 @@ if (simTpEl) simTpEl.addEventListener("input", () => { clampNonNegativeInput(sim
 if (simSlEl) simSlEl.addEventListener("input", () => { clampNonNegativeInput(simSlEl); setSimRuleNote(false); });
 
 restoreUiState();
+updateDesktopModeClass();
+window.addEventListener("resize", updateDesktopModeClass, { passive: true });
 initSidebarPinFallback();
 initCoinListInteractionGuard();
 initChartResizeObserver();

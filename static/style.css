@@ -1781,3 +1781,26 @@ label.chk input[type="checkbox"] {
     display: grid !important;
   }
 }
+
+/* JS 강제 데스크톱 모드: 브라우저 미디어쿼리 오판과 무관하게 PC는 스티키 유지 */
+body.desktop-mode .main {
+  grid-template-columns: 320px minmax(0, 1fr) !important;
+}
+
+body.desktop-mode .coin-side-sticky {
+  position: sticky !important;
+  top: 12px !important;
+  height: auto !important;
+  align-self: start !important;
+}
+
+body.desktop-mode .coin-side {
+  max-height: calc(100vh - 24px) !important;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  height: auto !important;
+}
+
+body.desktop-mode .sim-box {
+  display: grid !important;
+}
