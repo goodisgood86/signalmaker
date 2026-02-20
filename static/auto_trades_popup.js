@@ -2,6 +2,7 @@ const filterSymbolEl = document.getElementById("filterSymbol");
 const filterModeEl = document.getElementById("filterMode");
 const filterStatusEl = document.getElementById("filterStatus");
 const summaryEl = document.getElementById("summary");
+const summarySignalStatusEl = document.getElementById("summarySignalStatus");
 const recordsBodyEl = document.getElementById("recordsBody");
 const emptyStateEl = document.getElementById("emptyState");
 const prevBtnEl = document.getElementById("prevBtn");
@@ -219,7 +220,9 @@ function applyExitModeUI() {
 }
 
 function setCfgStatus(msg) {
-  if (cfgStatusEl) cfgStatusEl.textContent = msg || "";
+  const text = String(msg || "");
+  if (cfgStatusEl) cfgStatusEl.textContent = text;
+  if (summarySignalStatusEl) summarySignalStatusEl.textContent = text;
 }
 
 function setCfgLockStatus(msg) {

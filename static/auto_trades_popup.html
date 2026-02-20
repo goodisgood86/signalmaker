@@ -443,9 +443,34 @@
       }
       .summary-head {
         margin: 4px 0 7px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .summary-head-title {
         font-size: 13px;
         font-weight: 780;
         color: rgba(234, 243, 255, 0.94);
+      }
+      .summary-signal-status {
+        display: inline-flex;
+        align-items: center;
+        max-width: min(100%, 760px);
+        border: 1px solid rgba(122, 245, 198, 0.38);
+        border-radius: 999px;
+        padding: 5px 10px;
+        font-size: 12px;
+        line-height: 1.35;
+        color: rgba(218, 255, 241, 0.96);
+        background: rgba(122, 245, 198, 0.12);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .summary-signal-status:empty {
+        display: none;
       }
       .summary-sub {
         border: 1px solid rgba(255, 255, 255, 0.18);
@@ -714,6 +739,10 @@
         .filters {
           grid-template-columns: 1fr;
         }
+        .summary-signal-status {
+          width: 100%;
+          max-width: 100%;
+        }
         .config-head-actions {
           width: 100%;
           justify-content: space-between;
@@ -911,7 +940,10 @@
       </div>
       </div>
     </section>
-    <div class="summary-head">거래 통계</div>
+    <div class="summary-head">
+      <span class="summary-head-title">거래 통계</span>
+      <span id="summarySignalStatus" class="summary-signal-status"></span>
+    </div>
     <div id="summary" class="summary">
       <div class="stat"><div class="stat-k">총 거래</div><div class="stat-v">-</div></div>
       <div class="stat"><div class="stat-k">손익금액</div><div class="stat-v">-</div></div>
@@ -1014,6 +1046,6 @@
         </div>
       </div>
     </div>
-    <script src="/static/auto_trades_popup.js?v=20260220aq"></script>
+    <script src="/static/auto_trades_popup.js?v=20260220ar"></script>
   </body>
 </html>
