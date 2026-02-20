@@ -3,6 +3,7 @@ const filterModeEl = document.getElementById("filterMode");
 const filterStatusEl = document.getElementById("filterStatus");
 const summaryEl = document.getElementById("summary");
 const summarySignalStatusEl = document.getElementById("summarySignalStatus");
+const recordsStateChipEl = document.getElementById("recordsStateChip");
 const recordsBodyEl = document.getElementById("recordsBody");
 const emptyStateEl = document.getElementById("emptyState");
 const prevBtnEl = document.getElementById("prevBtn");
@@ -85,6 +86,7 @@ let collateralInsufficient = false;
 let collateralGuardBusy = false;
 let lastCollateralFetchMs = 0;
 const COLLATERAL_MIN_INTERVAL_MS = 30000;
+let latestOpenCount = null;
 
 function fmtPrice(v) {
   const n = Number(v);
@@ -224,7 +226,36 @@ function applyExitModeUI() {
 function setCfgStatus(msg) {
   const text = String(msg || "");
   if (cfgStatusEl) cfgStatusEl.textContent = text;
-  if (summarySignalStatusEl) summarySignalStatusEl.textContent = text;
+  if (summarySignalStatusEl) {
+    if (text) summarySignalStatusEl.textContent = text;
+    else summarySignalStatusEl.textContent = currentTradeStateInfo().text;
+  }
+}
+
+function currentTradeStateInfo(records = null) {
+  let openCount = null;
+  if (Number.isFinite(latestOpenCount)) openCount = Math.max(0, Math.round(Number(latestOpenCount)));
+  if (openCount === null && Array.isArray(records)) {
+    openCount = records.filter((r) => String(r?.status || "").toUpperCase() === "OPEN").length;
+  }
+  if (Number.isFinite(openCount) && openCount > 0) {
+    return { text: `거래중 ${openCount}건`, cls: "live" };
+  }
+  if (collateralInsufficient) return { text: "담보금 부족", cls: "warn" };
+  if (autoRunActive) return { text: "자동매매 대기", cls: "wait" };
+  return { text: "자동매매 중지", cls: "off" };
+}
+
+function updateCurrentTradeStateChip(records = null) {
+  const info = currentTradeStateInfo(records);
+  if (recordsStateChipEl) {
+    recordsStateChipEl.textContent = info.text;
+    recordsStateChipEl.classList.remove("live", "wait", "warn", "off");
+    recordsStateChipEl.classList.add(info.cls);
+  }
+  if (summarySignalStatusEl && !String(summarySignalStatusEl.textContent || "").trim()) {
+    summarySignalStatusEl.textContent = info.text;
+  }
 }
 
 function setCfgLockStatus(msg) {
@@ -346,6 +377,7 @@ function evaluateCollateralState() {
   }
   collateralInsufficient = available + 1e-9 < orderSize;
   updateTopRunButton();
+  updateCurrentTradeStateChip();
 }
 
 async function enforceCollateralGuard() {
@@ -470,6 +502,7 @@ function applyConfig(cfg) {
   }
   setConfigDirty(false);
   evaluateCollateralState();
+  updateCurrentTradeStateChip();
 }
 
 function collectConfigPayload() {
@@ -838,12 +871,14 @@ async function runNow() {
 function renderSummary(stats) {
   if (!summaryEl) return;
   const s = stats || {};
+  latestOpenCount = Number.isFinite(Number(s.open)) ? Number(s.open) : latestOpenCount;
   const cards = [
     ["총 거래", Number(s.total || 0).toLocaleString("ko-KR")],
     ["손익금액", `${fmtSigned(Number(s.realized_pnl_usdt || 0))} USDT`],
     ["손익%", `${Number(s.realized_pnl_pct || 0).toFixed(2)}%`],
   ];
   summaryEl.innerHTML = cards.map((x) => `<div class="stat"><div class="stat-k">${x[0]}</div><div class="stat-v">${x[1]}</div></div>`).join("");
+  updateCurrentTradeStateChip();
 }
 
 function render(records) {
@@ -851,6 +886,7 @@ function render(records) {
   if (!Array.isArray(records) || records.length === 0) {
     recordsBodyEl.innerHTML = `<tr class="records-empty-row"><td colspan="9" class="records-num">표시할 기록이 없습니다.</td></tr>`;
     if (emptyStateEl) emptyStateEl.hidden = true;
+    updateCurrentTradeStateChip([]);
     return;
   }
   if (emptyStateEl) emptyStateEl.hidden = true;
@@ -886,6 +922,7 @@ function render(records) {
       </tr>`;
     })
     .join("");
+  updateCurrentTradeStateChip(rows);
 }
 
 async function loadStats(sync = false) {
