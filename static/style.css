@@ -166,8 +166,8 @@ body {
 
 .coin-side-sticky {
   min-height: 0;
-  position: relative !important;
-  top: auto;
+  position: sticky !important;
+  top: 12px;
   align-self: start;
   width: 100%;
   min-width: 0;
@@ -178,8 +178,8 @@ body {
 }
 
 .coin-side {
-  position: sticky;
-  top: 12px;
+  position: relative;
+  top: auto;
   min-height: 0;
   width: auto;
   height: auto;
@@ -1482,8 +1482,6 @@ label.chk input[type="checkbox"] {
   }
 
   .coin-side {
-    position: static;
-    top: auto;
     max-height: none;
     overflow: visible;
     scrollbar-gutter: auto;
@@ -1555,8 +1553,6 @@ label.chk input[type="checkbox"] {
   }
 
   .coin-side {
-    position: static;
-    top: auto;
     max-height: none;
     overflow: visible;
     scrollbar-gutter: auto;
@@ -1636,8 +1632,6 @@ label.chk input[type="checkbox"] {
   }
 
   .coin-side {
-    position: static;
-    top: auto;
     max-height: none;
     overflow: visible;
     scrollbar-gutter: auto;

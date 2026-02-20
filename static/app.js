@@ -664,72 +664,49 @@ function coinKey(symbol, market) {
 
 function bindCoinItemEvents(btn, symbol, market) {
   const onSelect = () => handleSelectCoin(symbol, market);
-  const isTouchDevice =
-    typeof window !== "undefined" &&
-    ("ontouchstart" in window || Number(navigator?.maxTouchPoints || 0) > 0);
-
-  if (!isTouchDevice) {
-    btn.addEventListener("click", onSelect);
-    return;
-  }
-
-  let touchStart = null;
-  btn.addEventListener(
-    "touchstart",
-    (ev) => {
-      const t = ev.changedTouches && ev.changedTouches[0];
-      if (!t) return;
-      touchStart = {
-        x: Number(t.clientX || 0),
-        y: Number(t.clientY || 0),
-        sy: Number(window.scrollY || window.pageYOffset || 0),
-        ts: Date.now(),
-        moved: false,
-      };
-    },
-    { passive: true }
-  );
-  btn.addEventListener(
-    "touchmove",
-    (ev) => {
-      if (!touchStart) return;
-      const t = ev.changedTouches && ev.changedTouches[0];
-      if (!t) return;
-      const dx = Math.abs(Number(t.clientX || 0) - touchStart.x);
-      const dy = Math.abs(Number(t.clientY || 0) - touchStart.y);
-      if (dx > 6 || dy > 6) touchStart.moved = true;
-    },
-    { passive: true }
-  );
-  btn.addEventListener("touchcancel", () => {
-    suppressCoinClickUntil = Date.now() + 280;
-    touchStart = null;
+  let touchTrack = null;
+  btn.addEventListener("pointerdown", (ev) => {
+    if (ev.pointerType === "mouse") return;
+    touchTrack = {
+      id: ev.pointerId,
+      x: Number(ev.clientX || 0),
+      y: Number(ev.clientY || 0),
+      sy: Number(window.scrollY || window.pageYOffset || 0),
+      ts: Date.now(),
+      moved: false,
+    };
   });
-  btn.addEventListener(
-    "touchend",
-    (ev) => {
-      if (!touchStart) return;
-      const elapsed = Date.now() - touchStart.ts;
-      const syNow = Number(window.scrollY || window.pageYOffset || 0);
-      const pageScrolled = Math.abs(syNow - Number(touchStart.sy || 0)) > 2;
-      const recentScroll = Date.now() - lastScrollActivityTs < 180;
-      const shouldSelect = !touchStart.moved && !pageScrolled && !recentScroll && elapsed <= 600;
-      touchStart = null;
-      if (!shouldSelect) {
-        suppressCoinClickUntil = Date.now() + 260;
-        return;
-      }
-      suppressCoinClickUntil = Date.now() + 450;
-      ev.preventDefault();
-      onSelect();
-    },
-    { passive: false }
-  );
-
-  btn.addEventListener("click", (ev) => {
+  btn.addEventListener("pointermove", (ev) => {
+    if (!touchTrack || ev.pointerId !== touchTrack.id) return;
+    const dx = Math.abs(Number(ev.clientX || 0) - touchTrack.x);
+    const dy = Math.abs(Number(ev.clientY || 0) - touchTrack.y);
+    if (dx > 6 || dy > 6) touchTrack.moved = true;
+  });
+  btn.addEventListener("pointercancel", (ev) => {
+    if (touchTrack && ev.pointerId === touchTrack.id) {
+      suppressCoinClickUntil = Date.now() + 280;
+      touchTrack = null;
+    }
+  });
+  btn.addEventListener("pointerup", (ev) => {
+    if (ev.pointerType === "mouse") return;
+    if (!touchTrack || ev.pointerId !== touchTrack.id) return;
+    const elapsed = Date.now() - touchTrack.ts;
+    const syNow = Number(window.scrollY || window.pageYOffset || 0);
+    const pageScrolled = Math.abs(syNow - Number(touchTrack.sy || 0)) > 2;
+    const recentScroll = Date.now() - lastScrollActivityTs < 180;
+    const shouldSelect = !touchTrack.moved && !pageScrolled && !recentScroll && elapsed <= 600;
+    touchTrack = null;
+    if (!shouldSelect) {
+      suppressCoinClickUntil = Date.now() + 260;
+      return;
+    }
+    suppressCoinClickUntil = Date.now() + 460;
+    onSelect();
+  });
+  btn.addEventListener("click", () => {
     if (Date.now() < suppressCoinClickUntil) return;
-    if (window.innerWidth <= 1100 && Date.now() - lastScrollActivityTs < 180) return;
-    ev.preventDefault();
+    if (window.innerWidth <= 1100 && Date.now() - lastScrollActivityTs < 130) return;
     onSelect();
   });
 }
