@@ -160,7 +160,7 @@ function isLikelyMobileBrowser() {
 }
 
 function updateDesktopModeClass() {
-  const desktop = !isLikelyMobileBrowser();
+  const desktop = !isLikelyMobileBrowser() && window.innerWidth > 1100;
   document.body.classList.toggle("desktop-mode", desktop);
   scheduleSidebarPinUpdate();
 }

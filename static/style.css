@@ -1567,27 +1567,6 @@ label.chk input[type="checkbox"] {
   }
 }
 
-/* 데스크톱(마우스) 환경은 폭이 좁아도 좌측 고정 레이아웃 유지 */
-@media (max-width: 1100px) and (hover: hover) and (pointer: fine) {
-  .sim-box {
-    display: grid !important;
-  }
-
-  .main {
-    grid-template-columns: 320px minmax(0, 1fr);
-  }
-
-  .coin-side-sticky {
-    position: sticky !important;
-    top: 12px;
-  }
-
-  .coin-side {
-    max-height: calc(100vh - 24px);
-    overflow-y: auto;
-    overflow-x: hidden;
-  }
-}
 
 @media (max-width: 900px) {
   .coin-side-sticky {
@@ -1754,31 +1733,6 @@ label.chk input[type="checkbox"] {
 
   .sim-prices {
     grid-template-columns: 1fr;
-  }
-}
-
-/* 최종 강제 규칙: PC(마우스)에서는 폭과 무관하게 좌측 고정 레이아웃 유지 */
-@media (hover: hover) and (pointer: fine) {
-  .main {
-    grid-template-columns: 320px minmax(0, 1fr) !important;
-  }
-
-  .coin-side-sticky {
-    position: sticky !important;
-    top: 12px !important;
-    height: auto !important;
-    align-self: start !important;
-  }
-
-  .coin-side {
-    max-height: calc(100vh - 24px) !important;
-    overflow-y: auto !important;
-    overflow-x: hidden !important;
-    height: auto !important;
-  }
-
-  .sim-box {
-    display: grid !important;
   }
 }
 
