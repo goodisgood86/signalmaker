@@ -275,7 +275,7 @@ def build_single_explain(
             "3) impulse = 전봉수익률 점수(±0.15), HIGH_VOL이면 ATR/가격 조건 패널티(-0.3) 추가 가능",
             "4) levels = AVWAP 위치 점수(±0.2) + VP POC 위치 점수(±0.2)",
             "5) 최종합: x = w_trend*trend + w_mean*mean_reversion + w_impulse*impulse + w_levels*levels",
-            "6) 확률변환: buy = sigmoid(x)*100, sell = 100-buy, confidence = |buy-50|/50",
+            "6) 확률변환: raw_buy = sigmoid(x), 최종 buy/sell은 calibration 반영 가능, confidence는 최종 buy/sell 격차 기반",
         ],
         "simple_guide": {
             "buy_sell": "매수%/매도%는 '오를 가능성 vs 내릴 가능성'의 상대 점수입니다.",
@@ -303,7 +303,7 @@ def build_single_explain(
             "drivers": f"주요 기여도: {top_driver_txt}",
         },
         "calc_breakdown": {
-            "formula": "x = Σ(raw_i × weight_i), buy=σ(x)×100, sell=100-buy",
+            "formula": "x = Σ(raw_i × weight_i), raw_buy=σ(x), final_buy는 calibration 적용 가능",
             "x": None if score_x is None else round(float(score_x), 6),
             "rows": breakdown,
         },

@@ -1108,6 +1108,20 @@ def _apply_calibration(raw_buy: float) -> tuple[float, bool, str | None]:
     return raw_buy, False, None
 
 
+def _confidence_from_buy_prob(buy_prob: float, *, raw_confidence: float | None = None) -> float:
+    p = float(buy_prob)
+    if not math.isfinite(p):
+        p = 0.5
+    p = max(0.0, min(1.0, p))
+    conf = min(1.0, abs(p - 0.5) * 2.0)
+    # 보정(calibration)으로 확률이 과도하게 커져도 기존 raw 신뢰도를 넘지 않게 보수 캡을 둔다.
+    if raw_confidence is not None:
+        rc = float(raw_confidence)
+        if math.isfinite(rc):
+            conf = min(conf, max(0.0, min(1.0, rc)))
+    return conf
+
+
 def _build_levels(df: pd.DataFrame) -> tuple[List[Dict[str, Any]], Dict[str, Any]]:
     pivots = find_pivots(df, left=3, right=3)
     anchors = select_avwap_anchors(df, pivots)
@@ -1399,9 +1413,11 @@ def _calc_pass_check_from_df(
             volume_profile=vp,
         )
 
-        buy = float(score.buy_pct)
-        sell = float(score.sell_pct)
-        conf = float(score.confidence)
+        raw_buy = float(score.buy_pct) / 100.0
+        buy_prob, _, _ = _apply_calibration(raw_buy)
+        buy = round(buy_prob * 100.0, 2)
+        sell = round((1.0 - buy_prob) * 100.0, 2)
+        conf = _confidence_from_buy_prob(buy_prob, raw_confidence=float(score.confidence))
         swing = _latest_swing(view, lookback=200)
         if swing is None:
             continue
@@ -5427,7 +5443,7 @@ async def _auto_trade_tick_core(
         buy_prob, _, _ = _apply_calibration(raw_buy)
         buy_pct = round(buy_prob * 100.0, 2)
         sell_pct = round((1.0 - buy_prob) * 100.0, 2)
-        confidence = float(score.confidence)
+        confidence = _confidence_from_buy_prob(buy_prob, raw_confidence=float(score.confidence))
         swing = _latest_swing(df, lookback=200)
         swing_up: Optional[bool] = None
         if swing is not None:
@@ -6606,6 +6622,7 @@ async def api_analysis_trendy(
     )
     raw_buy = score.buy_pct / 100.0
     buy_prob, calibrated, calibration_method = _apply_calibration(raw_buy)
+    confidence = _confidence_from_buy_prob(buy_prob, raw_confidence=float(score.confidence))
 
     payload: Dict[str, Any] = {
         "symbol": symbol.upper(),
@@ -6617,8 +6634,9 @@ async def api_analysis_trendy(
         "regime": regime.regime,
         "buy_pct": round(buy_prob * 100.0, 2),
         "sell_pct": round((1.0 - buy_prob) * 100.0, 2),
-        "confidence": score.confidence,
+        "confidence": round(confidence, 3),
         "raw_buy_pct": round(raw_buy * 100.0, 2),
+        "raw_confidence": round(float(score.confidence), 3),
         "calibrated": calibrated,
         "calibration_method": calibration_method,
         "reasons": score.reasons,
@@ -6721,6 +6739,7 @@ async def api_analysis_trendy_mtf(
         raw_buy = score.buy_pct / 100.0
         tf_buy_prob[tf] = raw_buy
         tf_regimes[tf] = regime.regime
+        tf_conf = _confidence_from_buy_prob(raw_buy, raw_confidence=float(score.confidence))
         tf_indicators = {
             "ema20": ind.ema20,
             "ema50": ind.ema50,
@@ -6761,7 +6780,7 @@ async def api_analysis_trendy_mtf(
         tf_result[tf]["explain"] = build_single_explain(
             buy_pct=tf_result[tf]["buy_pct"],
             sell_pct=tf_result[tf]["sell_pct"],
-            confidence=min(1.0, abs(raw_buy - 0.5) * 2.0),
+            confidence=tf_conf,
             regime=tf_result[tf]["regime"],
             close=tf_result[tf]["close"],
             indicators=tf_indicators,
@@ -6783,7 +6802,8 @@ async def api_analysis_trendy_mtf(
     agreement_shift = max(-0.06, min(0.06, agreement_raw * 0.22))
     raw_buy = min(1.0, max(0.0, base + filter_shift + agreement_shift))
     buy_prob, calibrated, calibration_method = _apply_calibration(raw_buy)
-    confidence = min(1.0, abs(raw_buy - 0.5) * 2.0)
+    raw_confidence = min(1.0, abs(raw_buy - 0.5) * 2.0)
+    confidence = _confidence_from_buy_prob(buy_prob, raw_confidence=raw_confidence)
 
     payload: Dict[str, Any] = {
         "symbol": symbol.upper(),
@@ -6793,6 +6813,7 @@ async def api_analysis_trendy_mtf(
         "buy_pct": round(buy_prob * 100.0, 2),
         "sell_pct": round((1.0 - buy_prob) * 100.0, 2),
         "raw_buy_pct": round(raw_buy * 100.0, 2),
+        "raw_confidence": round(raw_confidence, 3),
         "confidence": round(confidence, 3),
         "calibrated": calibrated,
         "calibration_method": calibration_method,
