@@ -1100,6 +1100,12 @@ button:hover {
   font-weight: 800;
 }
 
+.decision-note {
+  margin: -1px 0 8px;
+  font-size: 11px;
+  color: rgba(241, 246, 255, 0.72);
+}
+
 .decision-steps {
   display: grid;
   gap: 6px;

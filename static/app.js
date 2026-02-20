@@ -761,7 +761,12 @@ function setAutoTickStatus(data) {
     return;
   }
   if (action === "NO_SIGNAL") {
-    const base = reason === "BASIC_PASS_FAIL" ? "자동매매 대기: 확률 미PASS" : "자동매매 대기: 진입 신호 없음";
+    const base =
+      reason === "SPOT_SELL_BLOCKED"
+        ? "자동매매 대기: 하락 우세지만 스팟 숏 금지"
+        : reason === "BASIC_PASS_FAIL"
+          ? "자동매매 대기: 확률 미PASS"
+          : "자동매매 대기: 진입 신호 없음";
     setAutoStatus(planText ? `${base} | ${planText}` : base);
     return;
   }
@@ -1883,6 +1888,7 @@ function renderActionSummary(analysis, fibPlan) {
   const mtfConflict = !mtfBias.aligned;
   if (mtfBias.aligned && mtfBias.side && sideSignal !== "WAIT" && sideSignal !== mtfBias.side) sideSignal = "WAIT";
   if (mtfConflict) sideSignal = "WAIT";
+  let spotSellBlocked = false;
 
   let side = sideSignal;
   // 스윙 충돌은 기본적으로 대기, 단 반전 바닥 롱 조건 충족 시 예외 허용한다.
@@ -1896,6 +1902,10 @@ function renderActionSummary(analysis, fibPlan) {
   // 신뢰도가 극단적으로 낮으면 방향 차이가 커도 관망으로 처리한다.
   if (conf < params.confFloor) sideSignal = "WAIT";
   if (regime === "HIGH_VOL" && conf < params.passRegimeConf && Math.abs(diff) < params.passRegimeDiff) sideSignal = "WAIT";
+  if (selectedMarket === "spot" && sideSignal === "SELL") {
+    spotSellBlocked = true;
+    sideSignal = "WAIT";
+  }
   if (sideSignal === "WAIT") side = "WAIT";
   setTradeLabels();
 
@@ -1927,12 +1937,16 @@ function renderActionSummary(analysis, fibPlan) {
   } else {
     actionBadgeEl.textContent = "관망";
     actionBadgeEl.className = "action-badge wait";
-    actionTitleEl.textContent = mtfConflict
+    actionTitleEl.textContent = spotSellBlocked
+      ? "하락 우세지만 스팟 숏 금지로 자동매매는 대기입니다."
+      : mtfConflict
       ? "상위 타임프레임 방향 충돌로 관망입니다."
       : swingConflict
         ? "확률 방향과 피보 스윙이 충돌해 관망입니다."
         : "지금은 관망이 유리합니다.";
-    actionSubtitleEl.textContent = mtfConflict
+    actionSubtitleEl.textContent = spotSellBlocked
+      ? "현물에서는 신규 SELL 진입이 불가합니다. 비중축소/관망 관점으로 해석하세요."
+      : mtfConflict
       ? "4h/1h 방향이 다릅니다. 상위 프레임이 정렬될 때까지 신규진입을 보류합니다."
       : swingConflict
         ? "확률은 한쪽 우위지만 피보 스윙이 반대입니다. 방향이 정렬될 때까지 대기하세요."
@@ -1949,6 +1963,7 @@ function renderActionSummary(analysis, fibPlan) {
   const regimeTxt =
     regime === "TREND" ? "추세장" : regime === "RANGE" ? "횡보장" : regime === "HIGH_VOL" ? "고변동장" : "중립장";
   let verdict = "그래서 관망이 유리합니다.";
+  if (spotSellBlocked) verdict = "그래서 하락 우세지만 스팟 숏 금지로 자동매매는 대기입니다.";
   if (side === "BUY") verdict = "그래서 매수 우세로 판단합니다.";
   if (side === "SELL") verdict = "그래서 하락 우세로 판단합니다.";
 
@@ -2167,9 +2182,14 @@ function renderActionSummary(analysis, fibPlan) {
   const passSignal = passSignalBase || passSignalAgg;
   setStepStatus(stepProbStatusEl, passSignal);
   if (stepProbDetailEl) {
-    const sidePct = side === "SELL" ? sell : buy;
-    const sideLabel = side === "SELL" ? "하락" : "매수";
-    if (swingConflict && !reversalOverride) {
+    const sideForDisplay = spotSellBlocked ? "SELL" : side;
+    const sidePct = sideForDisplay === "SELL" ? sell : buy;
+    const sideLabel = sideForDisplay === "SELL" ? "하락" : "매수";
+    if (spotSellBlocked) {
+      stepProbDetailEl.textContent = `확률: 매수 ${buy.toFixed(2)}% / 하락 ${sell.toFixed(2)}% | 신뢰도 ${(conf * 100).toFixed(
+        1
+      )}%\n상태: 하락 우세이나 스팟 숏 금지로 자동매매 대기`;
+    } else if (swingConflict && !reversalOverride) {
       stepProbDetailEl.textContent = `확률: 매수 ${buy.toFixed(2)}% / 하락 ${sell.toFixed(2)}% | 신뢰도 ${(conf * 100).toFixed(
         1
       )}%\n상태: 스윙 정방향 불일치(하락 스윙 예외 미충족)`;
@@ -2249,7 +2269,10 @@ function renderActionSummary(analysis, fibPlan) {
     }
   }
   if (decisionFinalEl) {
-    if (swingConflict && !reversalOverride) {
+    if (spotSellBlocked) {
+      if (stepFinalStatusEl) setStepStatus(stepFinalStatusEl, false);
+      decisionFinalEl.textContent = "하락 우세지만 스팟 숏 금지로 자동매매는 진입 대기";
+    } else if (swingConflict && !reversalOverride) {
       if (stepFinalStatusEl) setStepStatus(stepFinalStatusEl, false);
       decisionFinalEl.textContent = "하락 스윙 예외 미충족으로 진입 보류";
     } else if (passExec && side === "BUY") {
@@ -2306,7 +2329,15 @@ function renderActionSummary(analysis, fibPlan) {
   if (decisionFinalEl && !fibPlan) decisionFinalEl.textContent = "데이터 대기";
   if (passCheckSummaryEl && !fibPlan) setPassCheckUI("pending");
   if (actionExplainEl) {
-    const setupTxt = reversalOverride ? "반전 바닥 롱" : side === "BUY" ? "추세/반등 롱" : side === "SELL" ? "하락 우세" : "관망";
+    const setupTxt = reversalOverride
+      ? "반전 바닥 롱"
+      : spotSellBlocked
+        ? "하락 우세(스팟 숏 금지)"
+        : side === "BUY"
+          ? "추세/반등 롱"
+          : side === "SELL"
+            ? "하락 우세"
+            : "관망";
     actionExplainEl.textContent =
       `[현재 값]\n` +
       `- 매수 ${buy.toFixed(2)}% / 매도 ${sell.toFixed(2)}% (원차이 ${rawDiff >= 0 ? "+" : ""}${rawDiff.toFixed(2)}%p, 피보보정 ${

@@ -1333,7 +1333,7 @@ def _calc_pass_check_from_df(
     entry_window_bars: int,
     min_signal_time_ms: int = 0,
     signal_step: int = 1,
-    use_mtf_gate: bool = True,
+    use_mtf_gate: bool = False,
     use_volume_filter: bool = True,
     use_reaction_entry: bool = True,
 ) -> Dict[str, Any]:
@@ -1402,130 +1402,162 @@ def _calc_pass_check_from_df(
         buy = float(score.buy_pct)
         sell = float(score.sell_pct)
         conf = float(score.confidence)
-        raw_diff = buy - sell
         swing = _latest_swing(view, lookback=200)
         if swing is None:
             continue
         is_up = bool(int(swing["is_up"]))
-        lo = float(swing["lo"])
-        hi = float(swing["hi"])
-        if hi <= lo:
+        if float(swing["hi"]) <= float(swing["lo"]):
             continue
-        swing_bias = 6.0 if is_up else -6.0
-        diff = raw_diff + swing_bias
-        params = _decision_params_by_regime(regime.regime, symbol)
+        atr14 = float(ind.atr14 or 0.0)
+        decision = _auto_decide_signal(
+            buy_pct=buy,
+            sell_pct=sell,
+            confidence=conf,
+            regime=regime.regime,
+            symbol=symbol,
+            market=market,
+            mode="balanced",
+            swing_is_up=is_up,
+        )
+        decision_side = str(decision.get("side", "WAIT")).upper()
+        if market == "spot" and decision_side == "SELL":
+            decision_side = "WAIT"
 
-        side = "WAIT"
-        if diff >= params["side_strong"] or (diff >= params["side_weak"] and conf >= params["conf_weak"]):
-            side = "BUY"
-        elif diff <= -params["side_strong"] or (diff <= -params["side_weak"] and conf >= params["conf_weak"]):
-            side = "SELL"
-        if conf < params["conf_floor"]:
-            side = "WAIT"
-        if regime.regime == "HIGH_VOL" and conf < params["pass_regime_conf"] and abs(diff) < params["pass_regime_diff"]:
-            side = "WAIT"
-        if (is_up and side == "SELL") or ((not is_up) and side == "BUY"):
-            side = "WAIT"
-        if market == "spot" and side == "SELL":
-            side = "WAIT"
-        if side != "WAIT" and mtf_map:
+        if decision_side != "WAIT" and mtf_map:
             s1 = _lookup_side_at_or_before(mtf_map.get("1h_t", []), mtf_map.get("1h_s", []), signal_time_ms)
             s4 = _lookup_side_at_or_before(mtf_map.get("4h_t", []), mtf_map.get("4h_s", []), signal_time_ms)
-            if s1 is None or s4 is None or s1 != s4 or s1 != side:
-                side = "WAIT"
-        if side != "WAIT" and use_volume_filter and t >= 20:
-            cur_vol = float(df["volume"].iloc[t])
-            avg_vol = float(df["volume"].iloc[t - 20 : t].mean())
-            if (not math.isfinite(cur_vol)) or (not math.isfinite(avg_vol)) or avg_vol <= 0 or cur_vol < avg_vol:
-                side = "WAIT"
-        if side == "WAIT":
+            if s1 is None or s4 is None or s1 != s4 or s1 != decision_side:
+                decision_side = "WAIT"
+
+        low_volume_block = False
+        if use_volume_filter and len(view) >= 22:
+            cur_idx = max(1, len(view) - 2)
+            try:
+                cur_vol = float(view["volume"].iloc[cur_idx])
+                avg_vol = float(view["volume"].iloc[max(0, cur_idx - 20) : cur_idx].mean())
+                if (not math.isfinite(cur_vol)) or (not math.isfinite(avg_vol)) or avg_vol <= 0 or cur_vol < avg_vol:
+                    low_volume_block = True
+            except Exception:
+                low_volume_block = False
+
+        reversal_ready = False
+        if (not bool(is_up)) and market in {"spot", "futures"}:
+            rp = _auto_build_fib_trade_plan(
+                side="BUY",
+                swing=swing,
+                close=close,
+                atr14=atr14,
+                mode="balanced",
+            )
+            if isinstance(rp, dict):
+                rev_lo = float(rp.get("entry_lo", rp["entry_price"]))
+                rev_hi = float(rp.get("entry_hi", rp["entry_price"]))
+                reversal_ready = (
+                    float(buy) > float(sell)
+                    and float(conf) >= float(_AUTO_REVERSAL_CONF_MIN)
+                    and _auto_has_entry_reaction_df(side="BUY", entry_lo=rev_lo, entry_hi=rev_hi, df=view, lookback=5)
+                )
+
+        score_side = decision_side
+        if reversal_ready and score_side == "WAIT":
+            score_side = "BUY"
+        swing_conflict = score_side in {"BUY", "SELL"} and (not _auto_side_matches_swing(score_side, bool(is_up)))
+        score_swing_conflict = swing_conflict and (not reversal_ready)
+        score_pack = _auto_calc_signal_score(
+            raw_diff=float(decision.get("raw_diff", 0.0)),
+            confidence=conf,
+            regime=regime.regime,
+            side=score_side,
+            swing_conflict=score_swing_conflict,
+            low_volume_block=low_volume_block,
+            reversal_ready=reversal_ready,
+        )
+        score_threshold = float(_AUTO_SIGNAL_SCORE_BASE)
+        pass_signal_score = float(score_pack.get("total", 0.0) or 0.0) >= score_threshold
+        pass_reversal_override = reversal_ready and float(score_pack.get("total", 0.0) or 0.0) >= max(
+            45.0, score_threshold - 8.0
+        )
+
+        trade_side = decision_side if decision_side in {"BUY", "SELL"} else "WAIT"
+        if swing_conflict:
+            if reversal_ready:
+                trade_side = "BUY"
+            else:
+                trade_side = "WAIT"
+        if trade_side == "WAIT" and reversal_ready:
+            trade_side = "BUY"
+
+        if (not pass_signal_score) and (not pass_reversal_override):
+            continue
+        if trade_side not in {"BUY", "SELL"}:
+            continue
+        if (trade_side == "BUY") and (not bool(is_up)) and (not reversal_ready):
             continue
 
-        p0 = _fib_price(is_up, lo, hi, 0.0)
-        p0236 = _fib_price(is_up, lo, hi, 0.236)
-        p0382 = _fib_price(is_up, lo, hi, 0.382)
-        p05 = _fib_price(is_up, lo, hi, 0.5)
-        p0618 = _fib_price(is_up, lo, hi, 0.618)
-        p0786 = _fib_price(is_up, lo, hi, 0.786)
-
-        atr_pct_raw = (float(ind.atr14) / close) if close > 0 else 0.0
-        atr_pct = min(0.05, max(0.004, atr_pct_raw))
-        # 1차 익절 최소 폭은 1.0%로 유지 (과도하게 짧은 익절 방지)
-        tp1_gap = min(0.022, max(0.01, atr_pct * 0.85))
-        stop_gap = min(0.028, max(0.007, atr_pct * 0.9))
-        fib_tol = close * params["fib_tol_pct"]
-
-        if side == "BUY" and is_up:
-            entry_lo, entry_hi = min(p05, p0618), max(p05, p0618)
-            stop = min(p0786, entry_lo * (1.0 - stop_gap))
-            tp1_lo, tp1_hi = _norm_tp(entry_hi, p0236, p0382, tp1_gap)
-        elif side == "BUY" and (not is_up):
-            entry_lo, entry_hi = min(p0, p0236), max(p0, p0236)
-            stop = min(p0 * 0.997, entry_lo * (1.0 - stop_gap))
-            tp1_lo, tp1_hi = _norm_tp(entry_hi, p0236, p0382, tp1_gap)
-        elif side == "SELL" and is_up:
-            entry_lo, entry_hi = min(p0382, p05), max(p0382, p05)
-            stop = min(p0618 * 0.997, entry_lo * (1.0 - stop_gap))
-            tp1_lo, tp1_hi = _norm_tp(entry_hi, p0236, p0382, tp1_gap * 1.1)
-        else:
-            entry_lo, entry_hi = min(p0, p0236), max(p0, p0236)
-            stop = min(p0 * 0.996, entry_lo * (1.0 - stop_gap))
-            tp1_lo, tp1_hi = _norm_tp(entry_hi, p0382, p05, tp1_gap * 1.1)
-
-        pass_prob = (
-            side == "BUY"
-            and buy >= params["prob_min_pct"]
-            and conf >= params["prob_min_conf"]
-            and (conf >= params["prob_soft_conf"] or diff >= params["side_strong"])
-        ) or (
-            side == "SELL"
-            and sell >= params["prob_min_pct"]
-            and conf >= params["prob_min_conf"]
-            and (conf >= params["prob_soft_conf"] or diff <= -params["side_strong"])
+        plan = _auto_build_fib_trade_plan(
+            side=trade_side,
+            swing=swing,
+            close=close,
+            atr14=atr14,
+            mode="balanced",
         )
-        pass_regime = (regime.regime != "HIGH_VOL") or conf >= params["pass_regime_conf"] or abs(diff) >= params["pass_regime_diff"]
-        pass_fib = (close >= entry_lo - fib_tol) and (
-            close <= (entry_hi + fib_tol * 1.6 if side == "SELL" else entry_hi + fib_tol)
+        if not isinstance(plan, dict):
+            continue
+        entry_price = float(plan["entry_price"])
+        entry_lo = float(plan.get("entry_lo", entry_price))
+        entry_hi = float(plan.get("entry_hi", entry_price))
+        stop = float(plan["stop_price"])
+        tp1 = float(plan["tp1_price"])
+
+        if _auto_plan_invalidated(side=trade_side, stop_price=stop, price_now=close):
+            continue
+        if _auto_zone_break_invalidated(side=trade_side, entry_lo=entry_lo, entry_hi=entry_hi, price_now=close):
+            continue
+        if _auto_chase_exceeded(side=trade_side, entry_lo=entry_lo, entry_hi=entry_hi, price_now=close):
+            continue
+        rr_entry = _auto_plan_rr(
+            side=trade_side,
+            entry_price=float(close if close > 0 else entry_price),
+            stop_price=stop,
+            tp1_price=tp1,
         )
-        entry_mid = (entry_lo + entry_hi) / 2.0
-        tp1_mid = (tp1_lo + tp1_hi) / 2.0
-        rr = (tp1_mid - entry_mid) / max(1e-12, (entry_mid - stop)) if entry_mid > stop else 0.0
-        min_tp_pass = max(0.01, tp1_gap * 0.55)
-        min_stop_pass = max(0.006, stop_gap * 0.7)
-        pass_plan = (
-            tp1_mid > entry_mid * (1.0 + min_tp_pass)
-            and stop < entry_mid * (1.0 - min_stop_pass)
-            and rr >= 0.9
-        )
-        if not (pass_prob and pass_regime and pass_fib and pass_plan):
+        if rr_entry + 1e-12 < float(_AUTO_MIN_ENTRY_RR):
             continue
 
         pass_cnt += 1
         entry_idx = -1
-        entry_px = entry_mid
+        entry_px = entry_price
         entry_search_end = min(len(df), t + 1 + int(entry_window_bars))
         for i in range(t + 1, entry_search_end):
             hi_bar = float(df["high"].iloc[i])
             lo_bar = float(df["low"].iloc[i])
-            if hi_bar >= entry_lo and lo_bar <= entry_hi:
-                if use_reaction_entry:
-                    confirm_idx = i + 1
-                    if confirm_idx >= len(df):
-                        break
-                    confirm_close = float(df["close"].iloc[confirm_idx])
-                    if side == "BUY" and confirm_close >= entry_hi:
-                        entry_idx = confirm_idx
-                        entry_px = min(entry_hi, max(entry_lo, confirm_close))
-                        break
-                    if side == "SELL" and confirm_close <= entry_lo:
-                        entry_idx = confirm_idx
-                        entry_px = min(entry_hi, max(entry_lo, confirm_close))
-                        break
-                    continue
-                entry_idx = i
-                close_bar = float(df["close"].iloc[i])
-                entry_px = min(entry_hi, max(entry_lo, close_bar))
-                break
+            close_bar = float(df["close"].iloc[i])
+            touched = _auto_entry_zone_touched(
+                entry_lo=entry_lo,
+                entry_hi=entry_hi,
+                high=hi_bar,
+                low=lo_bar,
+                close=close_bar,
+            )
+            if not touched:
+                continue
+            if use_reaction_entry:
+                confirm_idx = i + 1
+                if confirm_idx >= len(df):
+                    break
+                confirm_close = float(df["close"].iloc[confirm_idx])
+                if trade_side == "BUY" and confirm_close >= entry_hi:
+                    entry_idx = confirm_idx
+                    entry_px = min(entry_hi, max(entry_lo, confirm_close))
+                    break
+                if trade_side == "SELL" and confirm_close <= entry_lo:
+                    entry_idx = confirm_idx
+                    entry_px = min(entry_hi, max(entry_lo, confirm_close))
+                    break
+                continue
+            entry_idx = i
+            entry_px = min(entry_hi, max(entry_lo, close_bar))
+            break
         if entry_idx < 0:
             no_entry_cnt += 1
             events.append(
@@ -1534,9 +1566,9 @@ def _calc_pass_check_from_df(
                     "entry_time_ms": None,
                     "executed": False,
                     "result": "NO_ENTRY",
-                    "side": side,
-                    "entry": round(entry_mid, 8),
-                    "tp1": round(tp1_mid, 8),
+                    "side": trade_side,
+                    "entry": round(entry_price, 8),
+                    "tp1": round(tp1, 8),
                     "stop": round(stop, 8),
                 }
             )
@@ -1548,15 +1580,26 @@ def _calc_pass_check_from_df(
         for i in range(entry_idx + 1, min(len(df), entry_idx + 1 + int(horizon_bars))):
             hi_bar = float(df["high"].iloc[i])
             lo_bar = float(df["low"].iloc[i])
-            if hi_bar >= tp1_mid and lo_bar <= stop:
-                sl_hit = True
-                break
-            if lo_bar <= stop:
-                sl_hit = True
-                break
-            if hi_bar >= tp1_mid:
-                tp_hit = True
-                break
+            if trade_side == "SELL":
+                if lo_bar <= tp1 and hi_bar >= stop:
+                    sl_hit = True
+                    break
+                if hi_bar >= stop:
+                    sl_hit = True
+                    break
+                if lo_bar <= tp1:
+                    tp_hit = True
+                    break
+            else:
+                if hi_bar >= tp1 and lo_bar <= stop:
+                    sl_hit = True
+                    break
+                if lo_bar <= stop:
+                    sl_hit = True
+                    break
+                if hi_bar >= tp1:
+                    tp_hit = True
+                    break
         if tp_hit:
             win_cnt += 1
             res = "TP1_HIT"
@@ -1573,9 +1616,9 @@ def _calc_pass_check_from_df(
                 {
                     "time_ms": signal_time_ms,
                     "entry_time_ms": int(df["open_time_ms"].iloc[entry_idx]),
-                    "side": side,
+                    "side": trade_side,
                     "entry": round(entry_px, 8),
-                    "tp1": round(tp1_mid, 8),
+                    "tp1": round(tp1, 8),
                     "stop": round(stop, 8),
                     "result": res,
                 }
@@ -1586,9 +1629,9 @@ def _calc_pass_check_from_df(
                 "entry_time_ms": int(df["open_time_ms"].iloc[entry_idx]),
                 "executed": True,
                 "result": res,
-                "side": side,
+                "side": trade_side,
                 "entry": round(entry_px, 8),
-                "tp1": round(tp1_mid, 8),
+                "tp1": round(tp1, 8),
                 "stop": round(stop, 8),
             }
         )
@@ -5500,7 +5543,8 @@ async def _auto_trade_tick_core(
         decision_side = str(decision.get("side", "WAIT")).upper()
         if mode == "aggressive" and decision_side == "WAIT":
             decision_side = _auto_pick_aggressive_side(buy_pct=buy_pct, sell_pct=sell_pct, market=market)
-        if market == "spot" and decision_side == "SELL":
+        spot_sell_blocked = market == "spot" and decision_side == "SELL"
+        if spot_sell_blocked:
             decision_side = "WAIT"
         score_side = decision_side
         if reversal_ready and score_side == "WAIT":
@@ -5558,7 +5602,12 @@ async def _auto_trade_tick_core(
                 _auto_pick_preview_side(decision.get("side", ""), "BUY" if bool(swing_up) else "SELL")
             )
             await _auto_update_config(user_id, cfg_id, {**cfg, "last_run_ms": now_ms})
-            out = {"ok": True, "action": "NO_SIGNAL", "reason": "SIGNAL_SIDE_WAIT", "signal": signal_info}
+            out = {
+                "ok": True,
+                "action": "NO_SIGNAL",
+                "reason": "SPOT_SELL_BLOCKED" if spot_sell_blocked else "SIGNAL_SIDE_WAIT",
+                "signal": signal_info,
+            }
             if isinstance(preview_plan, dict):
                 out["plan"] = preview_plan
             return out
@@ -6961,6 +7010,7 @@ async def api_pass_check_batch(
     bootstrap_signal_step = max(1, min(bootstrap_signal_step, 48))
     initial_signal_step = int(payload.get("initial_signal_step", 3) or 3)
     initial_signal_step = max(1, min(initial_signal_step, 24))
+    use_mtf_gate = bool(payload.get("use_mtf_gate", False))
 
     updated: List[Dict[str, Any]] = []
     now_ms = int(time() * 1000)
@@ -7033,7 +7083,7 @@ async def api_pass_check_batch(
                     entry_window_bars=5,
                     min_signal_time_ms=last_signal_ms,
                     signal_step=signal_step,
-                    use_mtf_gate=True,
+                    use_mtf_gate=use_mtf_gate,
                     use_volume_filter=True,
                     use_reaction_entry=True,
                 )
