@@ -79,6 +79,7 @@ let coinListDirty = false;
 let coinListDeferredTimer = null;
 let lastScrollActivityTs = 0;
 let lastTouchPointerTs = 0;
+let isCoinListScrolling = false;
 let coinListNodes = new Map();
 const COIN_LIST_SCROLL_DEFER_MS = 380;
 
@@ -96,9 +97,13 @@ function flushDeferredCoinListRender() {
 function noteCoinListScrollActivity() {
   if (window.innerWidth > 1100) return;
   lastScrollActivityTs = Date.now();
+  isCoinListScrolling = true;
+  if (coinListEl) coinListEl.classList.add("is-scrolling");
   if (coinListDeferredTimer) clearTimeout(coinListDeferredTimer);
   coinListDeferredTimer = setTimeout(() => {
     coinListDeferredTimer = null;
+    isCoinListScrolling = false;
+    if (coinListEl) coinListEl.classList.remove("is-scrolling");
     flushDeferredCoinListRender();
   }, COIN_LIST_SCROLL_DEFER_MS);
 }
@@ -668,6 +673,7 @@ function bindCoinItemEvents(btn, symbol, market) {
   let touchTrack = null;
   btn.addEventListener("pointerdown", (ev) => {
     if (ev.pointerType === "mouse") return;
+    if (isCoinListScrolling) return;
     lastTouchPointerTs = Date.now();
     suppressCoinClickUntil = Math.max(suppressCoinClickUntil, Date.now() + 700);
     touchTrack = {
@@ -693,6 +699,7 @@ function bindCoinItemEvents(btn, symbol, market) {
   });
   btn.addEventListener("pointerup", (ev) => {
     if (ev.pointerType === "mouse") return;
+    if (isCoinListScrolling) return;
     if (!touchTrack || ev.pointerId !== touchTrack.id) return;
     const elapsed = Date.now() - touchTrack.ts;
     const syNow = Number(window.scrollY || window.pageYOffset || 0);
@@ -708,6 +715,7 @@ function bindCoinItemEvents(btn, symbol, market) {
     onSelect();
   });
   btn.addEventListener("click", () => {
+    if (isCoinListScrolling) return;
     if (Date.now() - lastTouchPointerTs < 900) return; // touch synthetic click 차단
     if (Date.now() < suppressCoinClickUntil) return;
     if (window.innerWidth <= 1100 && Date.now() - lastScrollActivityTs < 130) return;

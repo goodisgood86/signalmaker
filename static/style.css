@@ -168,7 +168,6 @@ body {
   min-height: 0;
   position: sticky !important;
   top: 12px;
-  height: calc(100vh - 24px);
   align-self: start;
   width: 100%;
   min-width: 0;
@@ -183,8 +182,8 @@ body {
   top: auto;
   min-height: 0;
   width: auto;
-  height: 100%;
-  max-height: none;
+  height: auto;
+  max-height: calc(100vh - 24px);
   overflow-y: auto;
   overflow-x: hidden;
   scrollbar-gutter: stable;
@@ -217,9 +216,30 @@ body {
   gap: 10px;
   text-align: left;
   color: var(--text);
-  transition: all 0.15s ease;
+  transition: none;
   touch-action: pan-y;
   -webkit-tap-highlight-color: transparent;
+  -webkit-appearance: none;
+  appearance: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.coin-list.is-scrolling .coin-item {
+  pointer-events: none;
+}
+
+@media (min-width: 1101px) {
+  .coin-side-sticky {
+    position: sticky !important;
+    top: 12px;
+  }
+
+  .coin-side {
+    max-height: calc(100vh - 24px);
+    overflow-y: auto;
+  }
 }
 
 @media (hover: hover) and (pointer: fine) {
