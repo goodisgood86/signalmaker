@@ -166,8 +166,8 @@ body {
 
 .coin-side-sticky {
   min-height: 0;
-  position: sticky !important;
-  top: 12px;
+  position: relative !important;
+  top: auto;
   align-self: start;
   width: 100%;
   min-width: 0;
@@ -178,6 +178,8 @@ body {
 }
 
 .coin-side {
+  position: sticky;
+  top: 12px;
   min-height: 0;
   width: auto;
   height: auto;
@@ -229,6 +231,13 @@ body {
 .coin-item.active {
   border-color: rgba(78, 230, 255, 0.78);
   background: rgba(78, 230, 255, 0.16);
+}
+
+@media (hover: none) and (pointer: coarse) {
+  .coin-item:active {
+    border-color: var(--line);
+    background: rgba(255, 255, 255, 0.03);
+  }
 }
 
 .coin-left {
@@ -1473,6 +1482,8 @@ label.chk input[type="checkbox"] {
   }
 
   .coin-side {
+    position: static;
+    top: auto;
     max-height: none;
     overflow: visible;
     scrollbar-gutter: auto;
@@ -1544,6 +1555,8 @@ label.chk input[type="checkbox"] {
   }
 
   .coin-side {
+    position: static;
+    top: auto;
     max-height: none;
     overflow: visible;
     scrollbar-gutter: auto;
@@ -1623,6 +1636,8 @@ label.chk input[type="checkbox"] {
   }
 
   .coin-side {
+    position: static;
+    top: auto;
     max-height: none;
     overflow: visible;
     scrollbar-gutter: auto;

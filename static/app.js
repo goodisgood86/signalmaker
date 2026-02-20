@@ -664,51 +664,72 @@ function coinKey(symbol, market) {
 
 function bindCoinItemEvents(btn, symbol, market) {
   const onSelect = () => handleSelectCoin(symbol, market);
+  const isTouchDevice =
+    typeof window !== "undefined" &&
+    ("ontouchstart" in window || Number(navigator?.maxTouchPoints || 0) > 0);
+
+  if (!isTouchDevice) {
+    btn.addEventListener("click", onSelect);
+    return;
+  }
+
   let touchStart = null;
-  let lastPointerType = "mouse";
-  btn.addEventListener("pointerdown", (ev) => {
-    const pType = String(ev.pointerType || "mouse");
-    lastPointerType = pType;
-    touchStart = {
-      id: ev.pointerId,
-      pointerType: pType,
-      x: Number(ev.clientX || 0),
-      y: Number(ev.clientY || 0),
-      sy: Number(window.scrollY || window.pageYOffset || 0),
-      ts: Date.now(),
-      moved: false,
-    };
-  });
-  btn.addEventListener("pointermove", (ev) => {
-    if (!touchStart || ev.pointerId !== touchStart.id) return;
-    const dx = Math.abs(Number(ev.clientX || 0) - touchStart.x);
-    const dy = Math.abs(Number(ev.clientY || 0) - touchStart.y);
-    if (dx > 8 || dy > 8) touchStart.moved = true;
-  });
-  btn.addEventListener("pointercancel", () => {
-    if (touchStart?.pointerType !== "mouse") suppressCoinClickUntil = Date.now() + 300;
+  btn.addEventListener(
+    "touchstart",
+    (ev) => {
+      const t = ev.changedTouches && ev.changedTouches[0];
+      if (!t) return;
+      touchStart = {
+        x: Number(t.clientX || 0),
+        y: Number(t.clientY || 0),
+        sy: Number(window.scrollY || window.pageYOffset || 0),
+        ts: Date.now(),
+        moved: false,
+      };
+    },
+    { passive: true }
+  );
+  btn.addEventListener(
+    "touchmove",
+    (ev) => {
+      if (!touchStart) return;
+      const t = ev.changedTouches && ev.changedTouches[0];
+      if (!t) return;
+      const dx = Math.abs(Number(t.clientX || 0) - touchStart.x);
+      const dy = Math.abs(Number(t.clientY || 0) - touchStart.y);
+      if (dx > 6 || dy > 6) touchStart.moved = true;
+    },
+    { passive: true }
+  );
+  btn.addEventListener("touchcancel", () => {
+    suppressCoinClickUntil = Date.now() + 280;
     touchStart = null;
   });
-  btn.addEventListener("pointerup", (ev) => {
-    if (!touchStart || ev.pointerId !== touchStart.id) return;
-    const pointerType = String(touchStart.pointerType || "mouse");
-    const elapsed = Date.now() - touchStart.ts;
-    const syNow = Number(window.scrollY || window.pageYOffset || 0);
-    const pageScrolled = Math.abs(syNow - Number(touchStart.sy || 0)) > 2;
-    const recentScroll = Date.now() - lastScrollActivityTs < 160;
-    let shouldSelect = !touchStart.moved && elapsed <= 650;
-    if (pointerType !== "mouse") shouldSelect = shouldSelect && !pageScrolled && !recentScroll;
-    touchStart = null;
-    if (!shouldSelect) {
-      if (pointerType !== "mouse") suppressCoinClickUntil = Date.now() + 260;
-      return;
-    }
-    suppressCoinClickUntil = Date.now() + (pointerType === "mouse" ? 180 : 420);
-    onSelect();
-  });
-  btn.addEventListener("click", () => {
+  btn.addEventListener(
+    "touchend",
+    (ev) => {
+      if (!touchStart) return;
+      const elapsed = Date.now() - touchStart.ts;
+      const syNow = Number(window.scrollY || window.pageYOffset || 0);
+      const pageScrolled = Math.abs(syNow - Number(touchStart.sy || 0)) > 2;
+      const recentScroll = Date.now() - lastScrollActivityTs < 180;
+      const shouldSelect = !touchStart.moved && !pageScrolled && !recentScroll && elapsed <= 600;
+      touchStart = null;
+      if (!shouldSelect) {
+        suppressCoinClickUntil = Date.now() + 260;
+        return;
+      }
+      suppressCoinClickUntil = Date.now() + 450;
+      ev.preventDefault();
+      onSelect();
+    },
+    { passive: false }
+  );
+
+  btn.addEventListener("click", (ev) => {
     if (Date.now() < suppressCoinClickUntil) return;
-    if (lastPointerType !== "mouse" && window.innerWidth <= 1100 && Date.now() - lastScrollActivityTs < 160) return;
+    if (window.innerWidth <= 1100 && Date.now() - lastScrollActivityTs < 180) return;
+    ev.preventDefault();
     onSelect();
   });
 }
