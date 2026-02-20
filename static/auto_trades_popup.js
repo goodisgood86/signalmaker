@@ -241,11 +241,16 @@ function currentTradeStateInfo(records = null) {
   if (openCount === null && Array.isArray(records)) {
     openCount = records.filter((r) => String(r?.status || "").toUpperCase() === "OPEN").length;
   }
+  if (autoRunActive) {
+    if (Number.isFinite(openCount) && openCount > 0) {
+      return { text: `거래중 ${openCount}건`, cls: "live" };
+    }
+    return { text: "자동매매 진행 중", cls: "wait" };
+  }
+  if (collateralInsufficient) return { text: "담보금 부족", cls: "warn" };
   if (Number.isFinite(openCount) && openCount > 0) {
     return { text: `거래중 ${openCount}건`, cls: "live" };
   }
-  if (collateralInsufficient) return { text: "담보금 부족", cls: "warn" };
-  if (autoRunActive) return { text: "자동매매 대기", cls: "wait" };
   return { text: "자동매매 중지", cls: "off" };
 }
 
