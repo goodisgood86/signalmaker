@@ -376,6 +376,17 @@ function savePassCheckCache(cacheObj) {
   } catch (_) {}
 }
 
+function trimPassCheckCache(cacheObj, maxKeys = 72) {
+  if (!cacheObj || typeof cacheObj !== "object") return {};
+  const keys = Object.keys(cacheObj);
+  if (keys.length <= maxKeys) return cacheObj;
+  const dropCount = keys.length - maxKeys;
+  for (let i = 0; i < dropCount; i += 1) {
+    delete cacheObj[keys[i]];
+  }
+  return cacheObj;
+}
+
 function renderProbAsset() {
   if (!probAssetEl) return;
   const coin = COINS.find((c) => c.symbol === selectedSymbol && c.market === selectedMarket) || COINS.find((c) => c.symbol === selectedSymbol);
@@ -408,7 +419,10 @@ let simRefreshTimer = null;
 let fxRefreshTimer = null;
 let spotListWs = null;
 let futuresListWs = null;
-let listWsReconnectTimer = null;
+let spotListReconnectTimer = null;
+let futuresListReconnectTimer = null;
+const listStreamFailureCount = { spot: 0, futures: 0 };
+const listStreamDisabled = { spot: false, futures: false };
 let chartWs = null;
 let chartWsReconnectTimer = null;
 let chartStreamKey = "";
@@ -438,7 +452,7 @@ let passCheckTimer = null;
 const PRICE_REFRESH_MS = 20000; // websocket 장애 대비 fallback
 const FX_REFRESH_MS = 60000;
 const NEWS_REFRESH_MS = 300000;
-const SIM_REFRESH_MS = 10000;
+const SIM_REFRESH_MS = 20000;
 
 const COINS = [
   { name: "비트코인", symbol: "BTCUSDT", market: "spot", mark: "₿" },
@@ -1128,11 +1142,119 @@ function connectListStream(market, symbols) {
   return ws;
 }
 
+function listStreamRef(market) {
+  return market === "futures" ? futuresListWs : spotListWs;
+}
+
+function setListStreamRef(market, ws) {
+  if (market === "futures") futuresListWs = ws;
+  else spotListWs = ws;
+}
+
+function listReconnectTimerRef(market) {
+  return market === "futures" ? futuresListReconnectTimer : spotListReconnectTimer;
+}
+
+function setListReconnectTimerRef(market, timer) {
+  if (market === "futures") futuresListReconnectTimer = timer;
+  else spotListReconnectTimer = timer;
+}
+
+function clearListReconnectTimer(market) {
+  const t = listReconnectTimerRef(market);
+  if (!t) return;
+  clearTimeout(t);
+  setListReconnectTimerRef(market, null);
+}
+
+function stopSingleListStream(market) {
+  clearListReconnectTimer(market);
+  const ws = listStreamRef(market);
+  if (!ws) return;
+  try {
+    ws.onclose = null;
+    ws.onmessage = null;
+    ws.onopen = null;
+    ws.onerror = null;
+    ws.close();
+  } catch (_) {}
+  setListStreamRef(market, null);
+}
+
 function stopListTickerStreams() {
-  if (listWsReconnectTimer) {
-    clearTimeout(listWsReconnectTimer);
-    listWsReconnectTimer = null;
-  }
+  stopSingleListStream("spot");
+  stopSingleListStream("futures");
+}
+
+function scheduleSingleListReconnect(market) {
+  if (document.hidden) return;
+  if (listStreamDisabled[market]) return;
+  if (listReconnectTimerRef(market)) return;
+  const fails = Math.max(1, Number(listStreamFailureCount[market] || 1));
+  const delay = Math.min(30000, 1500 * Math.pow(2, Math.max(0, fails - 1)));
+  const timer = setTimeout(() => {
+    setListReconnectTimerRef(market, null);
+    startSingleListStream(market);
+  }, delay);
+  setListReconnectTimerRef(market, timer);
+}
+
+function startSingleListStream(market) {
+  if (document.hidden) return;
+  if (listStreamDisabled[market]) return;
+  const prev = listStreamRef(market);
+  if (prev && (prev.readyState === WebSocket.OPEN || prev.readyState === WebSocket.CONNECTING)) return;
+  stopSingleListStream(market);
+  const symbols = COINS.filter((c) => c.market === market).map((c) => c.symbol);
+  if (!symbols.length) return;
+  const ws = connectListStream(market, symbols);
+  if (!ws) return;
+  setListStreamRef(market, ws);
+  ws.onopen = () => {
+    listStreamFailureCount[market] = 0;
+  };
+  ws.onclose = () => {
+    if (listStreamRef(market) !== ws) return;
+    setListStreamRef(market, null);
+    listStreamFailureCount[market] = Number(listStreamFailureCount[market] || 0) + 1;
+    // 지역/정책 차단으로 지속 실패하는 시장은 세션 동안 비활성화
+    if (listStreamFailureCount[market] >= 6) {
+      listStreamDisabled[market] = true;
+      return;
+    }
+    scheduleSingleListReconnect(market);
+  };
+  ws.onerror = () => {
+    try {
+      ws.close();
+    } catch (_) {}
+  };
+}
+
+function resetListStreamHealth() {
+  listStreamFailureCount.spot = 0;
+  listStreamFailureCount.futures = 0;
+  listStreamDisabled.spot = false;
+  listStreamDisabled.futures = false;
+}
+
+function startListTickerStreams() {
+  if (document.hidden) return;
+  startSingleListStream("spot");
+  startSingleListStream("futures");
+}
+
+function hasLiveListStream() {
+  const isLive = (ws) => ws && ws.readyState === WebSocket.OPEN;
+  return Boolean(isLive(spotListWs) || isLive(futuresListWs));
+}
+
+function scheduleListTickerReconnect() {
+  scheduleSingleListReconnect("spot");
+  scheduleSingleListReconnect("futures");
+}
+
+function startListTickerStreamsLegacy__deprecated() {
   const closeWs = (ws) => {
     if (!ws) return;
     try {
@@ -1145,42 +1267,6 @@ function stopListTickerStreams() {
   closeWs(futuresListWs);
   spotListWs = null;
   futuresListWs = null;
-}
-
-function scheduleListTickerReconnect() {
-  if (document.hidden) return;
-  if (listWsReconnectTimer) return;
-  listWsReconnectTimer = setTimeout(() => {
-    listWsReconnectTimer = null;
-    startListTickerStreams();
-  }, 2500);
-}
-
-function startListTickerStreams() {
-  stopListTickerStreams();
-  if (document.hidden) return;
-
-  const spotSymbols = COINS.filter((c) => c.market === "spot").map((c) => c.symbol);
-  const futuresSymbols = COINS.filter((c) => c.market === "futures").map((c) => c.symbol);
-  const nextSpotWs = connectListStream("spot", spotSymbols);
-  const nextFuturesWs = connectListStream("futures", futuresSymbols);
-  spotListWs = nextSpotWs;
-  futuresListWs = nextFuturesWs;
-
-  if (nextSpotWs) {
-    nextSpotWs.onclose = () => {
-      if (spotListWs !== nextSpotWs) return;
-      spotListWs = null;
-      scheduleListTickerReconnect();
-    };
-  }
-  if (nextFuturesWs) {
-    nextFuturesWs.onclose = () => {
-      if (futuresListWs !== nextFuturesWs) return;
-      futuresListWs = null;
-      scheduleListTickerReconnect();
-    };
-  }
 }
 
 function stopChartStream() {
@@ -1218,6 +1304,7 @@ function handleVisibilityRealtime() {
     stopAnalysisStream();
     return;
   }
+  resetListStreamHealth();
   startListTickerStreams();
   connectChartStream();
   connectAnalysisStream();
@@ -2457,7 +2544,7 @@ async function loadPassCheck(symbol, market, analysisMode, analysisInterval) {
     }
     setPassCheckUI("success", nextPayload);
     uiCache[key] = nextPayload;
-    savePassCheckCache(uiCache);
+    savePassCheckCache(trimPassCheckCache(uiCache));
   } catch (e) {
     if (e?.name === "AbortError") return;
     setPassCheckUI("error", {
@@ -2644,6 +2731,7 @@ function startAutoRefresh() {
 
   priceRefreshTimer = setInterval(() => {
     if (document.hidden) return;
+    if (hasLiveListStream()) return;
     safeLoadPrices();
   }, PRICE_REFRESH_MS);
 

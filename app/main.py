@@ -109,7 +109,8 @@ async def _fetch_klines_paged_for_pass_check(
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    app.state.binance = CachedBinanceClient(ttl_seconds=10.0)
+    cache_max = max(64, int(str(os.getenv("BINANCE_CACHE_MAX_ENTRIES", "192")) or "192"))
+    app.state.binance = CachedBinanceClient(ttl_seconds=10.0, cache_max_entries=cache_max)
     try:
         yield
     finally:
@@ -130,6 +131,28 @@ _PASS_CHECK_CACHE: Dict[str, Any] = {}
 _WS_ANALYSIS_CACHE: Dict[str, Any] = {}
 _WS_ANALYSIS_CACHE_TTL_S = 3.0
 _WS_ANALYSIS_POLL_S = 3.0
+_PASS_TUNE_CACHE_MAX = max(24, int(str(os.getenv("PASS_TUNE_CACHE_MAX", "80")) or "80"))
+_PASS_TUNE_PROFILE_CACHE_MAX = max(24, int(str(os.getenv("PASS_TUNE_PROFILE_CACHE_MAX", "80")) or "80"))
+_WS_ANALYSIS_CACHE_MAX = max(24, int(str(os.getenv("WS_ANALYSIS_CACHE_MAX", "120")) or "120"))
+
+
+def _trim_ttl_cache(cache_obj: Dict[str, Any], *, now_ts: float, ttl_s: float) -> None:
+    stale: List[str] = []
+    for k, v in cache_obj.items():
+        ts = float(v.get("ts", 0.0)) if isinstance(v, dict) else 0.0
+        if now_ts - ts > ttl_s:
+            stale.append(k)
+    for k in stale:
+        cache_obj.pop(k, None)
+
+
+def _set_bounded_cache(cache_obj: Dict[str, Any], key: str, value: Any, *, max_entries: int) -> None:
+    cache_obj[key] = value
+    overflow = len(cache_obj) - max_entries
+    if overflow <= 0:
+        return
+    for old_k in list(cache_obj.keys())[:overflow]:
+        cache_obj.pop(old_k, None)
 
 
 def _pc_window_start_ms(days: int = 90) -> int:
@@ -2058,6 +2081,8 @@ async def api_pass_check_tune(
     limit: int = Query(700, ge=220, le=1500),
 ):
     now_ts = time()
+    _trim_ttl_cache(_PASS_TUNE_CACHE, now_ts=now_ts, ttl_s=1800.0)
+    _trim_ttl_cache(_PASS_TUNE_PROFILE_CACHE, now_ts=now_ts, ttl_s=1800.0)
     symbol_u = symbol.upper()
     profile = _symbol_profile(symbol_u)
     cache_key = f"{symbol_u}:{market}:{interval}:{limit}"
@@ -2133,24 +2158,33 @@ async def api_pass_check_tune(
         "candidates": results,
         "cached": "none",
     }
-    _PASS_TUNE_CACHE[cache_key] = {"ts": now_ts, "payload": payload}
+    _set_bounded_cache(
+        _PASS_TUNE_CACHE,
+        cache_key,
+        {"ts": now_ts, "payload": payload},
+        max_entries=_PASS_TUNE_CACHE_MAX,
+    )
     if best is not None:
-        _PASS_TUNE_PROFILE_CACHE[profile_key] = {"ts": now_ts, "best": best}
+        _set_bounded_cache(
+            _PASS_TUNE_PROFILE_CACHE,
+            profile_key,
+            {"ts": now_ts, "best": best},
+            max_entries=_PASS_TUNE_PROFILE_CACHE_MAX,
+        )
     return payload
 
 
 @app.websocket("/ws/analysis")
 async def ws_analysis(websocket: WebSocket):
     await websocket.accept()
+    query = parse_qs(websocket.url.query)
+    symbol = str(query.get("symbol", ["BTCUSDT"])[0]).upper()
+    market = str(query.get("market", ["spot"])[0]).lower()
+    interval = str(query.get("interval", ["5m"])[0])
+    mode = str(query.get("mode", ["single"])[0]).lower()
+    limit = int(str(query.get("limit", ["500"])[0]))
     try:
         while True:
-            query = parse_qs(websocket.url.query)
-            symbol = str(query.get("symbol", ["BTCUSDT"])[0]).upper()
-            market = str(query.get("market", ["spot"])[0]).lower()
-            interval = str(query.get("interval", ["5m"])[0])
-            mode = str(query.get("mode", ["single"])[0]).lower()
-            limit = int(str(query.get("limit", ["500"])[0]))
-
             if market not in ALLOWED_MARKETS:
                 try:
                     await websocket.send_json({"error": f"market must be one of {sorted(ALLOWED_MARKETS)}"})
@@ -2164,6 +2198,11 @@ async def ws_analysis(websocket: WebSocket):
             try:
                 cache_key = f"{mode}:{symbol}:{market}:{interval}:{limit}"
                 now_ts = time()
+                _trim_ttl_cache(
+                    _WS_ANALYSIS_CACHE,
+                    now_ts=now_ts,
+                    ttl_s=max(_WS_ANALYSIS_CACHE_TTL_S * 3.0, 10.0),
+                )
                 cached = _WS_ANALYSIS_CACHE.get(cache_key)
                 if isinstance(cached, dict) and (now_ts - float(cached.get("ts", 0.0))) <= _WS_ANALYSIS_CACHE_TTL_S:
                     payload = cached.get("payload")
@@ -2177,7 +2216,12 @@ async def ws_analysis(websocket: WebSocket):
                             market=market,
                             limit=limit,
                         )
-                    _WS_ANALYSIS_CACHE[cache_key] = {"ts": now_ts, "payload": payload}
+                    _set_bounded_cache(
+                        _WS_ANALYSIS_CACHE,
+                        cache_key,
+                        {"ts": now_ts, "payload": payload},
+                        max_entries=_WS_ANALYSIS_CACHE_MAX,
+                    )
                 await websocket.send_json(payload)
             except HTTPException as e:
                 try:

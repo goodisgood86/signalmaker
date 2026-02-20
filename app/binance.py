@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import OrderedDict
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import os
@@ -99,9 +100,19 @@ class BinanceClient:
 
 
 class _TTLCache:
-    def __init__(self, ttl_seconds: float = 10.0) -> None:
+    def __init__(self, ttl_seconds: float = 10.0, max_entries: int = 128) -> None:
         self._ttl = ttl_seconds
-        self._store: Dict[Tuple[str, str, str, int], Tuple[float, List[Kline]]] = {}
+        self._max_entries = max(16, int(max_entries))
+        self._store: "OrderedDict[Tuple[str, str, str, int], Tuple[float, List[Kline]]]" = OrderedDict()
+        self._set_count = 0
+
+    def _prune_expired(self, now_ts: float) -> None:
+        expired_keys: List[Tuple[str, str, str, int]] = []
+        for k, (ts, _) in self._store.items():
+            if now_ts - ts > self._ttl:
+                expired_keys.append(k)
+        for k in expired_keys:
+            self._store.pop(k, None)
 
     def get(self, key: Tuple[str, str, str, int], now_ts: float) -> List[Kline] | None:
         item = self._store.get(key)
@@ -111,19 +122,28 @@ class _TTLCache:
         if now_ts - ts > self._ttl:
             self._store.pop(key, None)
             return None
+        self._store.move_to_end(key)
         return value
 
     def set(self, key: Tuple[str, str, str, int], now_ts: float, value: List[Kline]) -> None:
+        self._set_count += 1
+        if self._set_count % 32 == 0:
+            self._prune_expired(now_ts)
+        if key in self._store:
+            self._store.pop(key, None)
         self._store[key] = (now_ts, value)
+        self._store.move_to_end(key)
+        while len(self._store) > self._max_entries:
+            self._store.popitem(last=False)
 
 
 class CachedBinanceClient:
-    def __init__(self, *, ttl_seconds: float = 10.0) -> None:
+    def __init__(self, *, ttl_seconds: float = 10.0, cache_max_entries: int = 128) -> None:
         spot_fallbacks: List[str] = [BINANCE_SPOT_FALLBACK_BASE_URL] if BINANCE_SPOT_FALLBACK_BASE_URL else []
         futures_fallbacks: List[str] = BINANCE_FUTURES_FALLBACK_BASE_URLS[:]
         self._spot = BinanceClient(base_url=BINANCE_SPOT_BASE_URL, market="spot", fallback_base_urls=spot_fallbacks)
         self._futures = BinanceClient(base_url=BINANCE_FUTURES_BASE_URL, market="futures", fallback_base_urls=futures_fallbacks)
-        self._cache = _TTLCache(ttl_seconds=ttl_seconds)
+        self._cache = _TTLCache(ttl_seconds=ttl_seconds, max_entries=cache_max_entries)
 
     async def aclose(self) -> None:
         await self._spot.aclose()
