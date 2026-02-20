@@ -110,7 +110,7 @@ async def _fetch_klines_paged_for_pass_check(
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    cache_max = max(64, int(str(os.getenv("BINANCE_CACHE_MAX_ENTRIES", "192")) or "192"))
+    cache_max = max(48, int(str(os.getenv("BINANCE_CACHE_MAX_ENTRIES", "96")) or "96"))
     app.state.binance = CachedBinanceClient(ttl_seconds=10.0, cache_max_entries=cache_max)
     try:
         yield
@@ -132,6 +132,7 @@ _PASS_CHECK_CACHE: Dict[str, Any] = {}
 _WS_ANALYSIS_CACHE: Dict[str, Any] = {}
 _WS_ANALYSIS_CACHE_TTL_S = 3.0
 _WS_ANALYSIS_POLL_S = 3.0
+_WS_ANALYSIS_FORCE_REFRESH_S = 30.0
 _PASS_TUNE_CACHE_MAX = max(24, int(str(os.getenv("PASS_TUNE_CACHE_MAX", "80")) or "80"))
 _PASS_TUNE_PROFILE_CACHE_MAX = max(24, int(str(os.getenv("PASS_TUNE_PROFILE_CACHE_MAX", "80")) or "80"))
 _WS_ANALYSIS_CACHE_MAX = max(24, int(str(os.getenv("WS_ANALYSIS_CACHE_MAX", "120")) or "120"))
@@ -172,6 +173,27 @@ def _try_malloc_trim() -> None:
 def _compact_runtime_memory() -> None:
     gc.collect()
     _try_malloc_trim()
+
+
+async def _ws_analysis_marker(*, symbol: str, market: str, mode: str, interval: str) -> tuple | None:
+    now_ts = time()
+    try:
+        if mode == "mtf":
+            k4h, k1h, k5m = await asyncio.gather(
+                app.state.binance.klines(symbol=symbol, interval="4h", limit=2, now_ts=now_ts, market=market),
+                app.state.binance.klines(symbol=symbol, interval="1h", limit=2, now_ts=now_ts, market=market),
+                app.state.binance.klines(symbol=symbol, interval="5m", limit=2, now_ts=now_ts, market=market),
+            )
+            o4 = int(k4h[-1].open_time_ms) if k4h else 0
+            o1 = int(k1h[-1].open_time_ms) if k1h else 0
+            o5 = int(k5m[-1].open_time_ms) if k5m else 0
+            return ("mtf", o4, o1, o5)
+
+        ks = await app.state.binance.klines(symbol=symbol, interval=interval, limit=2, now_ts=now_ts, market=market)
+        ot = int(ks[-1].open_time_ms) if ks else 0
+        return ("single", interval, ot)
+    except Exception:
+        return None
 
 
 def _pc_window_start_ms(days: int = 90) -> int:
@@ -2208,6 +2230,8 @@ async def ws_analysis(websocket: WebSocket):
     interval = str(query.get("interval", ["5m"])[0])
     mode = str(query.get("mode", ["single"])[0]).lower()
     limit = int(str(query.get("limit", ["500"])[0]))
+    last_marker: tuple | None = None
+    last_sent_ts = 0.0
     try:
         while True:
             if market not in ALLOWED_MARKETS:
@@ -2221,8 +2245,14 @@ async def ws_analysis(websocket: WebSocket):
                 continue
 
             try:
+                marker = await _ws_analysis_marker(symbol=symbol, market=market, mode=mode, interval=interval)
                 cache_key = f"{mode}:{symbol}:{market}:{interval}:{limit}"
                 now_ts = time()
+                marker_changed = marker is None or marker != last_marker
+                force_refresh = (now_ts - last_sent_ts) >= _WS_ANALYSIS_FORCE_REFRESH_S
+                if not marker_changed and not force_refresh:
+                    await asyncio.sleep(_WS_ANALYSIS_POLL_S)
+                    continue
                 _trim_ttl_cache(
                     _WS_ANALYSIS_CACHE,
                     now_ts=now_ts,
@@ -2248,6 +2278,9 @@ async def ws_analysis(websocket: WebSocket):
                         max_entries=_WS_ANALYSIS_CACHE_MAX,
                     )
                 await websocket.send_json(payload)
+                if marker is not None:
+                    last_marker = marker
+                last_sent_ts = now_ts
             except HTTPException as e:
                 try:
                     await websocket.send_json({"error": str(e.detail)})
