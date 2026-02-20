@@ -3,6 +3,7 @@ const filterModeEl = document.getElementById("filterMode");
 const filterStatusEl = document.getElementById("filterStatus");
 const summaryEl = document.getElementById("summary");
 const summarySignalStatusEl = document.getElementById("summarySignalStatus");
+const summaryRefreshBtnEl = document.getElementById("summaryRefreshBtn");
 const recordsStateChipEl = document.getElementById("recordsStateChip");
 const recordsBodyEl = document.getElementById("recordsBody");
 const emptyStateEl = document.getElementById("emptyState");
@@ -73,6 +74,7 @@ let page = 1;
 let hasNext = false;
 let activeLoadSeq = 0;
 let refreshTimer = null;
+let statsRefreshTimer = null;
 let collateralRefreshTimer = null;
 let binanceLinkBusy = false;
 let binanceLinkActive = false;
@@ -86,6 +88,7 @@ let collateralInsufficient = false;
 let collateralGuardBusy = false;
 let lastCollateralFetchMs = 0;
 const COLLATERAL_MIN_INTERVAL_MS = 30000;
+const STATS_REFRESH_INTERVAL_MS = 60000;
 let latestOpenCount = null;
 
 function fmtPrice(v) {
@@ -1092,6 +1095,14 @@ if (cfgCollapseBtnEl) cfgCollapseBtnEl.addEventListener("click", () => toggleCon
 if (bnLinkBtnEl) bnLinkBtnEl.addEventListener("click", () => linkBinance());
 if (bnUnlinkBtnEl) bnUnlinkBtnEl.addEventListener("click", () => unlinkBinance());
 if (logicOpenBtnEl) logicOpenBtnEl.addEventListener("click", () => setLogicModalOpen(true));
+if (summaryRefreshBtnEl)
+  summaryRefreshBtnEl.addEventListener("click", () => {
+    loadStats(false).catch((e) => {
+      const msg = errMessage(e);
+      if (handleLockedError(msg)) return;
+      setCfgStatus(`거래 통계 새로고침 실패: ${msg}`);
+    });
+  });
 if (centerCloseBtnEl)
   centerCloseBtnEl.addEventListener("click", () => {
     try {
@@ -1120,10 +1131,14 @@ Promise.all([load(), loadStats()]).catch((e) => alert(e.message || e));
 refreshTimer = setInterval(() => {
   if (document.hidden) return;
   load().catch(() => {});
-  loadStats(false).catch(() => {});
 }, 8000);
+statsRefreshTimer = setInterval(() => {
+  if (document.hidden) return;
+  loadStats(false).catch(() => {});
+}, STATS_REFRESH_INTERVAL_MS);
 window.addEventListener("beforeunload", () => {
   if (refreshTimer) clearInterval(refreshTimer);
+  if (statsRefreshTimer) clearInterval(statsRefreshTimer);
   if (collateralRefreshTimer) clearInterval(collateralRefreshTimer);
 });
 

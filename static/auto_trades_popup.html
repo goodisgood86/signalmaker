@@ -486,6 +486,14 @@
         gap: 8px;
         flex-wrap: wrap;
       }
+      .summary-head-actions {
+        display: inline-flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 8px;
+        margin-left: auto;
+        flex-wrap: wrap;
+      }
       .summary-head-title {
         font-size: 13px;
         font-weight: 780;
@@ -508,6 +516,14 @@
       }
       .summary-signal-status:empty {
         display: none;
+      }
+      .summary-refresh-btn {
+        width: auto;
+        min-width: 80px;
+        height: 30px;
+        padding: 0 10px;
+        font-size: 12px;
+        border-radius: 9px;
       }
       .summary-sub {
         border: 1px solid rgba(255, 255, 255, 0.18);
@@ -784,6 +800,14 @@
           width: 100%;
           max-width: 100%;
         }
+        .summary-head-actions {
+          width: 100%;
+          margin-left: 0;
+          justify-content: space-between;
+        }
+        .summary-refresh-btn {
+          min-width: 74px;
+        }
         .config-head-actions {
           width: 100%;
           justify-content: space-between;
@@ -983,7 +1007,10 @@
     </section>
     <div class="summary-head">
       <span class="summary-head-title">거래 통계</span>
-      <span id="summarySignalStatus" class="summary-signal-status"></span>
+      <div class="summary-head-actions">
+        <span id="summarySignalStatus" class="summary-signal-status"></span>
+        <button id="summaryRefreshBtn" class="ghost summary-refresh-btn" type="button">새로고침</button>
+      </div>
     </div>
     <div id="summary" class="summary">
       <div class="stat"><div class="stat-k">총 거래</div><div class="stat-v">-</div></div>
@@ -1090,6 +1117,6 @@
         </div>
       </div>
     </div>
-    <script src="/static/auto_trades_popup.js?v=20260220at"></script>
+    <script src="/static/auto_trades_popup.js?v=20260220au"></script>
   </body>
 </html>
