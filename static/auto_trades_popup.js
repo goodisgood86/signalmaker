@@ -461,6 +461,7 @@ async function loadConfigLockStatus() {
     const enabled = Boolean(data?.enabled);
     const unlocked = !enabled || Boolean(data?.unlocked);
     setConfigLocked(!unlocked);
+    await loadRuntimeStatus();
     await loadBinanceLink();
     if (!unlocked) {
       setCfgLockStatus("비밀번호를 입력 후 설정을 사용할 수 있습니다.");
@@ -473,6 +474,17 @@ async function loadConfigLockStatus() {
     setConfigLocked(true);
     setCfgLockStatus(`잠금 상태 조회 실패: ${msg}`);
   }
+}
+
+async function loadRuntimeStatus() {
+  try {
+    const data = await fetchJSON("/api/auto_trade/runtime");
+    const runtime = data?.runtime || {};
+    autoRunActive = Boolean(runtime?.enabled);
+    if (cfgEnabledEl) cfgEnabledEl.checked = autoRunActive;
+    updateTopRunButton();
+    updateCurrentTradeStateChip();
+  } catch (_) {}
 }
 
 function setUnlockBusy(busy) {

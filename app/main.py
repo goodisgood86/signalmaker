@@ -335,6 +335,46 @@ def _cfg_unlock_enabled() -> bool:
     return bool(_cfg_unlock_expected_hash())
 
 
+def _cfg_unlock_signing_secret() -> bytes:
+    raw = str(os.getenv("APP_CONFIG_UNLOCK_TOKEN_SECRET", "")).strip()
+    if not raw:
+        raw = str(os.getenv("APP_SECRET_KEY", "")).strip()
+    if not raw:
+        raw = _cfg_unlock_expected_hash()
+    return raw.encode("utf-8")
+
+
+def _cfg_unlock_issue_token(exp_ms: int) -> str:
+    payload_obj = {"exp_ms": int(exp_ms)}
+    payload_raw = json.dumps(payload_obj, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
+    payload = base64.urlsafe_b64encode(payload_raw).decode("utf-8").rstrip("=")
+    sig = hmac.new(_cfg_unlock_signing_secret(), payload.encode("utf-8"), hashlib.sha256).hexdigest()
+    return f"v2.{payload}.{sig}"
+
+
+def _cfg_unlock_verify_token(token: str | None) -> bool:
+    raw = str(token or "").strip()
+    if not raw:
+        return False
+    parts = raw.split(".")
+    if len(parts) != 3 or parts[0] != "v2":
+        return False
+    payload = parts[1]
+    supplied_sig = parts[2]
+    expected_sig = hmac.new(_cfg_unlock_signing_secret(), payload.encode("utf-8"), hashlib.sha256).hexdigest()
+    if not secrets.compare_digest(expected_sig, supplied_sig):
+        return False
+    try:
+        pad = "=" * (-len(payload) % 4)
+        decoded = base64.urlsafe_b64decode((payload + pad).encode("utf-8")).decode("utf-8")
+        obj = json.loads(decoded)
+        exp_ms = int(obj.get("exp_ms", 0) or 0)
+    except Exception:
+        return False
+    now_ms = int(time() * 1000)
+    return exp_ms > now_ms
+
+
 def _cfg_unlock_cleanup_sessions(now_ms: int) -> None:
     stale = []
     for sid, sess in _CFG_UNLOCK_SESSIONS.items():
@@ -352,7 +392,7 @@ def _cfg_unlock_cleanup_sessions(now_ms: int) -> None:
 def _cfg_unlock_create_session(*, ip: str, ua: str) -> tuple[str, int]:
     now_ms = int(time() * 1000)
     exp_ms = now_ms + (_CFG_UNLOCK_SESSION_TTL_S * 1000)
-    sid = secrets.token_urlsafe(32)
+    sid = _cfg_unlock_issue_token(exp_ms)
     _CFG_UNLOCK_SESSIONS[sid] = {
         "created_ms": now_ms,
         "exp_ms": exp_ms,
@@ -366,6 +406,9 @@ def _cfg_unlock_create_session(*, ip: str, ua: str) -> tuple[str, int]:
 def _cfg_unlock_valid_session(sid: str | None) -> bool:
     if not sid:
         return False
+    if _cfg_unlock_verify_token(sid):
+        return True
+    # 하위호환: 기존 인메모리 세션 쿠키도 TTL 내에서는 허용
     now_ms = int(time() * 1000)
     _cfg_unlock_cleanup_sessions(now_ms)
     sess = _CFG_UNLOCK_SESSIONS.get(str(sid))
@@ -4777,6 +4820,23 @@ async def api_auto_trade_get_config(
     user_id = int(public_user.get("id"))
     cfg = await _auto_get_or_create_config(user_id)
     return {"ok": True, "config": cfg}
+
+
+@app.get("/api/auto_trade/runtime")
+async def api_auto_trade_runtime():
+    public_user = await _sim_get_or_create_public_user()
+    user_id = int(public_user.get("id"))
+    cfg = await _auto_get_or_create_config(user_id)
+    return {
+        "ok": True,
+        "runtime": {
+            "enabled": bool(cfg.get("enabled")),
+            "symbol": str(cfg.get("symbol") or ""),
+            "mode": str(cfg.get("mode") or ""),
+            "interval": str(cfg.get("interval") or ""),
+            "last_run_ms": int(cfg.get("last_run_ms", 0) or 0),
+        },
+    }
 
 
 @app.post("/api/auto_trade/config")
