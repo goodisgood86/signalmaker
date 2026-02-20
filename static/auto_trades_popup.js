@@ -92,6 +92,7 @@ const COLLATERAL_MIN_INTERVAL_MS = 30000;
 const STATS_REFRESH_INTERVAL_MS = 60000;
 let latestOpenCount = null;
 let runningSymbol = "BTCUSDT";
+let latestTickStatusText = "";
 
 function fmtPrice(v) {
   const n = Number(v);
@@ -249,6 +250,8 @@ function applyExitModeUI() {
 function setCfgStatus(msg) {
   const text = String(msg || "");
   if (cfgStatusEl) cfgStatusEl.textContent = text;
+  latestTickStatusText = text;
+  updateTopRunButton();
   updateCurrentTradeStateChip();
 }
 
@@ -341,7 +344,7 @@ function updateTopRunButton() {
     runDisabledReason = "담보금 부족으로 실행할 수 없습니다.";
     cfgTopRunBtnEl.classList.add("is-disabled");
     cfgTopRunBtnEl.title = runDisabledReason;
-    if (cfgTopRunHintEl) cfgTopRunHintEl.textContent = runDisabledReason;
+    if (cfgTopRunHintEl) cfgTopRunHintEl.textContent = latestTickStatusText || runDisabledReason;
     updateRunningSymbolChip();
     return;
   }
@@ -351,7 +354,7 @@ function updateTopRunButton() {
     if (locked) runDisabledReason = "설정 잠금 해제 후 중지할 수 있습니다.";
     cfgTopRunBtnEl.classList.toggle("is-disabled", cfgTopRunBtnEl.disabled);
     cfgTopRunBtnEl.title = runDisabledReason;
-    if (cfgTopRunHintEl) cfgTopRunHintEl.textContent = runDisabledReason;
+    if (cfgTopRunHintEl) cfgTopRunHintEl.textContent = latestTickStatusText || runDisabledReason;
     updateRunningSymbolChip();
     return;
   }
