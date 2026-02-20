@@ -1756,3 +1756,28 @@ label.chk input[type="checkbox"] {
     grid-template-columns: 1fr;
   }
 }
+
+/* 최종 강제 규칙: PC(마우스)에서는 폭과 무관하게 좌측 고정 레이아웃 유지 */
+@media (hover: hover) and (pointer: fine) {
+  .main {
+    grid-template-columns: 320px minmax(0, 1fr) !important;
+  }
+
+  .coin-side-sticky {
+    position: sticky !important;
+    top: 12px !important;
+    height: auto !important;
+    align-self: start !important;
+  }
+
+  .coin-side {
+    max-height: calc(100vh - 24px) !important;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    height: auto !important;
+  }
+
+  .sim-box {
+    display: grid !important;
+  }
+}
