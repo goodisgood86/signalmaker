@@ -78,11 +78,12 @@ let coinSwitchSeq = 0;
 let coinListDirty = false;
 let coinListDeferredTimer = null;
 let lastScrollActivityTs = 0;
+let coinListNodes = new Map();
 const COIN_LIST_SCROLL_DEFER_MS = 380;
 
 function clearSidebarPin() {
   if (!coinSideStickyEl) return;
-  coinSideStickyEl.style.transform = "translateY(0px)";
+  coinSideStickyEl.style.transform = "";
 }
 
 function flushDeferredCoinListRender() {
@@ -164,24 +165,8 @@ function getScrollTopAndRect(host) {
 }
 
 function updateSidebarPinNow() {
-  if (!coinSideStickyEl || !mainLayoutEl) return;
-  const stickyPos = window.getComputedStyle(coinSideStickyEl).position;
-  if (window.innerWidth <= 1100 || stickyPos === "static") {
-    clearSidebarPin();
-    return;
-  }
-
-  const host = sidebarScrollHost || window;
-  const { scrollTop, hostTop } = getScrollTopAndRect(host);
-  const mainRect = mainLayoutEl.getBoundingClientRect();
-  const sideHeight = coinSideStickyEl.offsetHeight;
-  if (sideHeight <= 0 || mainRect.height <= 0) return;
-
-  const topGap = 12;
-  const mainTop = mainRect.top - hostTop + scrollTop;
-  const maxMove = Math.max(0, mainRect.height - sideHeight);
-  const move = Math.max(0, Math.min(maxMove, scrollTop + topGap - mainTop));
-  coinSideStickyEl.style.transform = `translateY(${Math.round(move)}px)`;
+  // CSS sticky를 기본으로 사용한다. JS 강제 이동은 모바일 렌더링 깜빡임을 유발할 수 있어 비활성화.
+  clearSidebarPin();
 }
 
 function scheduleSidebarPinUpdate() {
@@ -193,25 +178,9 @@ function scheduleSidebarPinUpdate() {
 }
 
 function initSidebarPinFallback() {
-  if (!coinSideStickyEl || !mainLayoutEl) return;
-  sidebarScrollHost = findScrollHost(mainLayoutEl);
-  window.addEventListener("resize", scheduleSidebarPinUpdate);
-  window.addEventListener("scroll", scheduleSidebarPinUpdate, { passive: true });
-  document.addEventListener("scroll", scheduleSidebarPinUpdate, true);
-  if (sidebarScrollHost && sidebarScrollHost !== window) {
-    sidebarScrollHost.addEventListener("scroll", scheduleSidebarPinUpdate, { passive: true });
-  }
-  if ("ResizeObserver" in window) {
-    sidebarPinObserver = new ResizeObserver(() => scheduleSidebarPinUpdate());
-    sidebarPinObserver.observe(mainLayoutEl);
-    sidebarPinObserver.observe(coinSideStickyEl);
-  }
-  if (sidebarPinTimer) clearInterval(sidebarPinTimer);
-  sidebarPinTimer = setInterval(() => {
-    if (document.hidden) return;
-    scheduleSidebarPinUpdate();
-  }, 1200);
-  scheduleSidebarPinUpdate();
+  if (!coinSideStickyEl) return;
+  clearSidebarPin();
+  window.addEventListener("resize", () => clearSidebarPin(), { passive: true });
 }
 
 function setStepStatus(el, ok) {
@@ -689,72 +658,116 @@ function handleSelectCoin(symbol, market) {
   }, 90);
 }
 
-function renderCoinList() {
+function coinKey(symbol, market) {
+  return `${market}:${symbol}`;
+}
+
+function bindCoinItemEvents(btn, symbol, market) {
+  const onSelect = () => handleSelectCoin(symbol, market);
+  let touchStart = null;
+  btn.addEventListener("pointerdown", (ev) => {
+    if (ev.pointerType === "mouse") return;
+    touchStart = {
+      id: ev.pointerId,
+      x: Number(ev.clientX || 0),
+      y: Number(ev.clientY || 0),
+      sy: Number(window.scrollY || window.pageYOffset || 0),
+      ts: Date.now(),
+      moved: false,
+    };
+  });
+  btn.addEventListener("pointermove", (ev) => {
+    if (!touchStart || ev.pointerId !== touchStart.id) return;
+    const dx = Math.abs(Number(ev.clientX || 0) - touchStart.x);
+    const dy = Math.abs(Number(ev.clientY || 0) - touchStart.y);
+    if (dx > 8 || dy > 8) touchStart.moved = true;
+  });
+  btn.addEventListener("pointercancel", () => {
+    suppressCoinClickUntil = Date.now() + 300;
+    touchStart = null;
+  });
+  btn.addEventListener("pointerup", (ev) => {
+    if (!touchStart || ev.pointerId !== touchStart.id) return;
+    const elapsed = Date.now() - touchStart.ts;
+    const syNow = Number(window.scrollY || window.pageYOffset || 0);
+    const pageScrolled = Math.abs(syNow - Number(touchStart.sy || 0)) > 2;
+    const recentScroll = Date.now() - lastScrollActivityTs < 160;
+    const shouldSelect = !touchStart.moved && !pageScrolled && !recentScroll && elapsed <= 650;
+    touchStart = null;
+    if (!shouldSelect) {
+      suppressCoinClickUntil = Date.now() + 260;
+      return;
+    }
+    suppressCoinClickUntil = Date.now() + 420;
+    onSelect();
+  });
+  btn.addEventListener("click", () => {
+    if (Date.now() < suppressCoinClickUntil) return;
+    if (window.innerWidth <= 1100 && Date.now() - lastScrollActivityTs < 160) return;
+    onSelect();
+  });
+}
+
+function ensureCoinListStructure() {
   if (!coinListEl) return;
+  if (coinListNodes.size === COINS.length && coinListEl.children.length === COINS.length) return;
   coinListEl.innerHTML = "";
+  coinListNodes = new Map();
   for (const c of COINS) {
     const li = document.createElement("li");
     const btn = document.createElement("button");
     btn.type = "button";
-    btn.className = `coin-item${c.symbol === selectedSymbol && c.market === selectedMarket ? " active" : ""}`;
+    btn.className = "coin-item";
+    const left = document.createElement("span");
+    left.className = "coin-left";
+    const mark = document.createElement("span");
+    mark.className = "coin-mark";
+    mark.textContent = c.mark || "•";
+    const name = document.createElement("span");
+    name.className = "coin-name";
+    name.textContent = c.name;
+    const tag = document.createElement("span");
+    tag.className = "coin-tag";
+    tag.textContent = c.market === "futures" ? "선물" : "현물";
+    left.appendChild(mark);
+    left.appendChild(name);
+    left.appendChild(tag);
+
+    const right = document.createElement("span");
+    right.className = "coin-right";
+    const priceEl = document.createElement("span");
+    priceEl.className = "coin-price";
+    const krwEl = document.createElement("span");
+    krwEl.className = "coin-price-krw";
+    const newsEl = document.createElement("span");
+    newsEl.className = "coin-news";
+    right.appendChild(priceEl);
+    right.appendChild(krwEl);
+    right.appendChild(newsEl);
+    btn.appendChild(left);
+    btn.appendChild(right);
+    bindCoinItemEvents(btn, c.symbol, c.market);
+    li.appendChild(btn);
+    coinListEl.appendChild(li);
+    coinListNodes.set(coinKey(c.symbol, c.market), { btn, priceEl, krwEl, newsEl });
+  }
+}
+
+function renderCoinList() {
+  if (!coinListEl) return;
+  ensureCoinListStructure();
+  for (const c of COINS) {
+    const nodes = coinListNodes.get(coinKey(c.symbol, c.market));
+    if (!nodes) continue;
     const price = coinPrices[c.symbol];
     const news = coinNews[c.symbol] || { positive: 0, negative: 0 };
     const priceText = Number.isFinite(price) ? formatPrice(price) : "가격 불러오는 중";
     const krwText = Number.isFinite(price) ? formatKrw(price * usdtKrw) : "원화 계산 중";
     const newsText = `긍정 ${Number(news.positive || 0)} / 부정 ${Number(news.negative || 0)}`;
-    btn.innerHTML = `
-      <span class="coin-left">
-        <span class="coin-mark">${c.mark || "•"}</span>
-        <span class="coin-name">${c.name}</span>
-        <span class="coin-tag">${c.market === "futures" ? "선물" : "현물"}</span>
-      </span>
-      <span class="coin-right">
-        <span class="coin-price">${priceText}</span>
-        <span class="coin-price-krw">${krwText}</span>
-        <span class="coin-news">${newsText}</span>
-      </span>
-    `;
-    const onSelect = () => handleSelectCoin(c.symbol, c.market);
-    let touchStart = null;
-    btn.addEventListener("pointerdown", (ev) => {
-      if (ev.pointerType === "mouse") return;
-      touchStart = {
-        id: ev.pointerId,
-        x: Number(ev.clientX || 0),
-        y: Number(ev.clientY || 0),
-        sy: Number(window.scrollY || window.pageYOffset || 0),
-        ts: Date.now(),
-        moved: false,
-      };
-    });
-    btn.addEventListener("pointermove", (ev) => {
-      if (!touchStart) return;
-      if (ev.pointerId !== touchStart.id) return;
-      const dx = Math.abs(Number(ev.clientX || 0) - touchStart.x);
-      const dy = Math.abs(Number(ev.clientY || 0) - touchStart.y);
-      if (dx > 10 || dy > 10) touchStart.moved = true;
-    });
-    btn.addEventListener("pointercancel", () => {
-      touchStart = null;
-    });
-    btn.addEventListener("pointerup", (ev) => {
-      if (!touchStart) return;
-      if (ev.pointerId !== touchStart.id) return;
-      const elapsed = Date.now() - touchStart.ts;
-      const syNow = Number(window.scrollY || window.pageYOffset || 0);
-      const pageScrolled = Math.abs(syNow - Number(touchStart.sy || 0)) > 4;
-      const shouldSelect = !touchStart.moved && !pageScrolled && elapsed <= 700;
-      touchStart = null;
-      if (!shouldSelect) return;
-      suppressCoinClickUntil = Date.now() + 450;
-      onSelect();
-    });
-    btn.addEventListener("click", () => {
-      if (Date.now() < suppressCoinClickUntil) return;
-      onSelect();
-    });
-    li.appendChild(btn);
-    coinListEl.appendChild(li);
+    nodes.btn.classList.toggle("active", c.symbol === selectedSymbol && c.market === selectedMarket);
+    if (nodes.priceEl.textContent !== priceText) nodes.priceEl.textContent = priceText;
+    if (nodes.krwEl.textContent !== krwText) nodes.krwEl.textContent = krwText;
+    if (nodes.newsEl.textContent !== newsText) nodes.newsEl.textContent = newsText;
   }
   scheduleSidebarPinUpdate();
 }
