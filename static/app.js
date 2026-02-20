@@ -75,10 +75,65 @@ let sidebarPinTimer = null;
 let suppressCoinClickUntil = 0;
 let coinSwitchTimer = null;
 let coinSwitchSeq = 0;
+let coinListDirty = false;
+let coinListDeferredTimer = null;
+let lastScrollActivityTs = 0;
+const COIN_LIST_SCROLL_DEFER_MS = 380;
 
 function clearSidebarPin() {
   if (!coinSideStickyEl) return;
   coinSideStickyEl.style.transform = "translateY(0px)";
+}
+
+function flushDeferredCoinListRender() {
+  if (!coinListDirty) return;
+  coinListDirty = false;
+  renderCoinList();
+}
+
+function noteCoinListScrollActivity() {
+  if (window.innerWidth > 1100) return;
+  lastScrollActivityTs = Date.now();
+  if (coinListDeferredTimer) clearTimeout(coinListDeferredTimer);
+  coinListDeferredTimer = setTimeout(() => {
+    coinListDeferredTimer = null;
+    flushDeferredCoinListRender();
+  }, COIN_LIST_SCROLL_DEFER_MS);
+}
+
+function requestCoinListRender(force = false) {
+  if (force) {
+    coinListDirty = false;
+    renderCoinList();
+    return;
+  }
+  const defer = window.innerWidth <= 1100 && Date.now() - lastScrollActivityTs < COIN_LIST_SCROLL_DEFER_MS;
+  if (defer) {
+    coinListDirty = true;
+    if (!coinListDeferredTimer) {
+      coinListDeferredTimer = setTimeout(() => {
+        coinListDeferredTimer = null;
+        flushDeferredCoinListRender();
+      }, COIN_LIST_SCROLL_DEFER_MS);
+    }
+    return;
+  }
+  renderCoinList();
+}
+
+function initCoinListInteractionGuard() {
+  const onActivity = () => noteCoinListScrollActivity();
+  window.addEventListener("scroll", onActivity, { passive: true });
+  window.addEventListener("touchmove", onActivity, { passive: true });
+  if (coinListEl) {
+    coinListEl.addEventListener("touchmove", onActivity, { passive: true });
+    coinListEl.addEventListener("wheel", onActivity, { passive: true });
+  }
+  const coinSideEl = document.querySelector(".coin-side");
+  if (coinSideEl) {
+    coinSideEl.addEventListener("scroll", onActivity, { passive: true });
+    coinSideEl.addEventListener("touchmove", onActivity, { passive: true });
+  }
 }
 
 function findScrollHost(el) {
@@ -616,7 +671,7 @@ function handleSelectCoin(symbol, market) {
   selectedMarket = market;
   saveUiState();
   renderProbAsset();
-  renderCoinList();
+  requestCoinListRender(true);
   renderNewsPanel();
   const reqSeq = ++coinSwitchSeq;
   if (coinSwitchTimer) clearTimeout(coinSwitchTimer);
@@ -667,6 +722,7 @@ function renderCoinList() {
         id: ev.pointerId,
         x: Number(ev.clientX || 0),
         y: Number(ev.clientY || 0),
+        sy: Number(window.scrollY || window.pageYOffset || 0),
         ts: Date.now(),
         moved: false,
       };
@@ -685,7 +741,9 @@ function renderCoinList() {
       if (!touchStart) return;
       if (ev.pointerId !== touchStart.id) return;
       const elapsed = Date.now() - touchStart.ts;
-      const shouldSelect = !touchStart.moved && elapsed <= 700;
+      const syNow = Number(window.scrollY || window.pageYOffset || 0);
+      const pageScrolled = Math.abs(syNow - Number(touchStart.sy || 0)) > 4;
+      const shouldSelect = !touchStart.moved && !pageScrolled && elapsed <= 700;
       touchStart = null;
       if (!shouldSelect) return;
       suppressCoinClickUntil = Date.now() + 450;
@@ -764,7 +822,7 @@ async function loadNewsSentiment() {
       };
     }
     coinNews = next;
-    renderCoinList();
+    requestCoinListRender();
     renderNewsPanel();
   } catch (_) {
   } finally {
@@ -778,7 +836,7 @@ function setCoinPrice(symbol, price) {
   if (coinRenderTimer) return;
   coinRenderTimer = setTimeout(() => {
     coinRenderTimer = null;
-    renderCoinList();
+    requestCoinListRender();
   }, 250);
 }
 
@@ -926,7 +984,7 @@ async function loadFxRate() {
     const rate = Number(data?.usdt_krw);
     if (Number.isFinite(rate) && rate > 0) {
       usdtKrw = rate;
-      renderCoinList();
+      requestCoinListRender();
     }
   } catch (_) {}
 }
@@ -952,7 +1010,7 @@ async function loadCoinPrices() {
     const next = {};
     for (const [sym, v] of result) next[sym] = v;
     coinPrices = next;
-    renderCoinList();
+    requestCoinListRender();
   } finally {
     isLoadingPrices = false;
   }
@@ -2509,11 +2567,12 @@ if (simSlEl) simSlEl.addEventListener("input", () => { clampNonNegativeInput(sim
 
 restoreUiState();
 initSidebarPinFallback();
+initCoinListInteractionGuard();
 initChartResizeObserver();
 renderProbAsset();
 populateSimSymbolOptions();
 syncSimSymbolWithSelected();
-renderCoinList();
+requestCoinListRender(true);
 renderNewsPanel();
 syncAnalysisControls();
 Promise.all([loadFxRate(), loadCoinPrices(), load()])
