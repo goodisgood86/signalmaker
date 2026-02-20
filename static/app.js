@@ -660,9 +660,35 @@ function renderCoinList() {
       </span>
     `;
     const onSelect = () => handleSelectCoin(c.symbol, c.market);
+    let touchStart = null;
     btn.addEventListener("pointerdown", (ev) => {
-      if (ev.pointerType === "mouse" && Number(ev.button) !== 0) return;
-      suppressCoinClickUntil = Date.now() + 500;
+      if (ev.pointerType === "mouse") return;
+      touchStart = {
+        id: ev.pointerId,
+        x: Number(ev.clientX || 0),
+        y: Number(ev.clientY || 0),
+        ts: Date.now(),
+        moved: false,
+      };
+    });
+    btn.addEventListener("pointermove", (ev) => {
+      if (!touchStart) return;
+      if (ev.pointerId !== touchStart.id) return;
+      const dx = Math.abs(Number(ev.clientX || 0) - touchStart.x);
+      const dy = Math.abs(Number(ev.clientY || 0) - touchStart.y);
+      if (dx > 10 || dy > 10) touchStart.moved = true;
+    });
+    btn.addEventListener("pointercancel", () => {
+      touchStart = null;
+    });
+    btn.addEventListener("pointerup", (ev) => {
+      if (!touchStart) return;
+      if (ev.pointerId !== touchStart.id) return;
+      const elapsed = Date.now() - touchStart.ts;
+      const shouldSelect = !touchStart.moved && elapsed <= 700;
+      touchStart = null;
+      if (!shouldSelect) return;
+      suppressCoinClickUntil = Date.now() + 450;
       onSelect();
     });
     btn.addEventListener("click", () => {
