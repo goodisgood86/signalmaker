@@ -299,6 +299,28 @@ _AUTO_SIGNAL_SCORE_BASE = max(30.0, min(95.0, float(str(os.getenv("AUTO_SIGNAL_S
 _AUTO_SIGNAL_SCORE_AGGR = max(20.0, min(90.0, float(str(os.getenv("AUTO_SIGNAL_SCORE_AGGR", "48")) or "48")))
 _AUTO_REVERSAL_CONF_MIN = max(0.1, min(0.9, float(str(os.getenv("AUTO_REVERSAL_CONF_MIN", "0.28")) or "0.28")))
 _AUTO_FLOW_SCORE_WEIGHT = max(0.2, min(0.3, float(str(os.getenv("AUTO_FLOW_SCORE_WEIGHT", "0.25")) or "0.25")))
+_AUTO_SIGNAL_SCORE_SYMBOL_BIAS: Dict[str, float] = {
+    "BTCUSDT": -4.0,
+    "ETHUSDT": -4.0,
+    "XRPUSDT": -4.0,
+    "DOGEUSDT": -4.0,
+    "SOLUSDT": -4.0,
+    "CROSSUSDT": -4.0,
+    "SUIUSDT": 0.0,
+}
+_AUTO_SIGNAL_SCORE_REGIME_BIAS: Dict[str, float] = {
+    "RANGE": -3.0,
+    "HIGH_VOL": -1.5,
+    "TREND": 3.0,
+}
+_AUTO_TREND_GATE_MIN_DIFF = max(0.0, min(40.0, float(str(os.getenv("AUTO_TREND_GATE_MIN_DIFF", "10")) or "10")))
+_AUTO_TREND_GATE_MIN_CONF = max(0.0, min(1.0, float(str(os.getenv("AUTO_TREND_GATE_MIN_CONF", "0.34")) or "0.34")))
+_AUTO_TREND_GATE_BYPASS_DIFF = max(0.0, min(50.0, float(str(os.getenv("AUTO_TREND_GATE_BYPASS_DIFF", "15")) or "15")))
+_AUTO_TP1_BE_ENABLED = str(os.getenv("AUTO_TP1_BE_ENABLED", "1")).strip().lower() not in {"0", "false", "no", "off"}
+_AUTO_TP1_BE_BUFFER_PCT = max(
+    0.0,
+    min(0.005, float(str(os.getenv("AUTO_TP1_BE_BUFFER_PCT", "0.0004")) or "0.0004")),
+)
 _AUTO_WS_PRICE_ENABLED = str(os.getenv("AUTO_WS_PRICE_ENABLED", "1")).strip().lower() not in {"0", "false", "no", "off"}
 _AUTO_WS_PRICE_MAX_STALE_S = max(
     3.0,
@@ -665,6 +687,29 @@ def _auto_plan_rr(*, side: str, entry_price: float, stop_price: float, tp1_price
     if reward <= 0:
         return 0.0
     return float(reward / risk)
+
+
+def _auto_tp1_breakeven_stop(*, side: str, entry_price: float, prev_stop: float) -> float:
+    entry = float(entry_price or 0.0)
+    stop = float(prev_stop or 0.0)
+    if entry <= 0:
+        return stop
+    if not _AUTO_TP1_BE_ENABLED:
+        return stop if stop > 0 else entry
+    if _AUTO_TP1_BE_BUFFER_PCT <= 0:
+        be = entry
+    else:
+        if str(side or "").upper() == "SELL":
+            be = entry * (1.0 - float(_AUTO_TP1_BE_BUFFER_PCT))
+        else:
+            be = entry * (1.0 + float(_AUTO_TP1_BE_BUFFER_PCT))
+    if str(side or "").upper() == "SELL":
+        if stop <= 0:
+            return be
+        return min(stop, be)
+    if stop <= 0:
+        return be
+    return max(stop, be)
 
 
 async def _auto_ws_price_worker(*, market: str, symbols: List[str]) -> None:
@@ -1172,6 +1217,31 @@ def _symbol_profile(symbol: str) -> str:
     return "default"
 
 
+def _auto_signal_score_threshold(*, symbol: str, regime: str, mode: str) -> float:
+    base = float(_AUTO_SIGNAL_SCORE_AGGR if str(mode or "").lower() == "aggressive" else _AUTO_SIGNAL_SCORE_BASE)
+    sym = str(symbol or "").upper().strip()
+    reg = str(regime or "").upper().strip()
+    sym_bias = float(_AUTO_SIGNAL_SCORE_SYMBOL_BIAS.get(sym, 0.0))
+    reg_bias = float(_AUTO_SIGNAL_SCORE_REGIME_BIAS.get(reg, 0.0))
+    if str(mode or "").lower() == "aggressive":
+        sym_bias *= 0.7
+        reg_bias *= 0.7
+    return float(_auto_clamp(base + sym_bias + reg_bias, 25.0, 95.0))
+
+
+def _auto_trend_gate_pass(*, regime: str, diff: float, confidence: float) -> tuple[bool, str]:
+    r = str(regime or "").upper().strip()
+    if r != "TREND":
+        return True, ""
+    edge = abs(float(diff))
+    conf = float(confidence)
+    if edge >= float(_AUTO_TREND_GATE_BYPASS_DIFF):
+        return True, ""
+    if edge >= float(_AUTO_TREND_GATE_MIN_DIFF) and conf >= float(_AUTO_TREND_GATE_MIN_CONF):
+        return True, ""
+    return False, "TREND_EDGE_WEAK"
+
+
 def _decision_params_by_regime(regime: str, symbol: str = "") -> Dict[str, float]:
     r = str(regime or "RANGE").upper()
     profile = _symbol_profile(symbol)
@@ -1515,7 +1585,7 @@ def _calc_pass_check_from_df(
             flow_score=float(flow_score),
             flow_weight=float(flow_weight),
         )
-        score_threshold = float(_AUTO_SIGNAL_SCORE_BASE)
+        score_threshold = _auto_signal_score_threshold(symbol=symbol, regime=regime.regime, mode="balanced")
         pass_signal_score = float(score_pack.get("total", 0.0) or 0.0) >= score_threshold
         pass_reversal_override = reversal_ready and float(score_pack.get("total", 0.0) or 0.0) >= max(
             45.0, score_threshold - 8.0
@@ -1524,10 +1594,17 @@ def _calc_pass_check_from_df(
         trade_side = decision_side if decision_side in {"BUY", "SELL"} else "WAIT"
         if trade_side == "WAIT" and reversal_ready:
             trade_side = "BUY"
+        trend_gate_ok, _ = _auto_trend_gate_pass(
+            regime=regime.regime,
+            diff=float(decision.get("diff", 0.0)),
+            confidence=conf,
+        )
 
         if (not pass_signal_score) and (not pass_reversal_override):
             continue
         if trade_side not in {"BUY", "SELL"}:
+            continue
+        if not trend_gate_ok:
             continue
         if (trade_side == "BUY") and (not bool(is_up)) and (not reversal_ready):
             continue
@@ -2524,6 +2601,13 @@ def _auto_eval_record_status(record: Dict[str, Any], klines: List[Any], now_ms: 
     tp2 = float(state.get("tp2_price", record.get("take_profit_price", 0.0)) or 0.0)
     if qty_initial <= 0 or rem_qty <= 0 or tp1 <= 0 or tp2 <= 0:
         return {"changed": False}
+    if tp1_hit:
+        sl = _auto_tp1_breakeven_stop(
+            side=side,
+            entry_price=entry,
+            prev_stop=float(state.get("be_stop_price", sl) or sl),
+        )
+        state["be_stop_price"] = round(sl, 8)
 
     hold_max_ms = int(state.get("hold_max_ms", _AUTO_HOLD_MAX_MS) or _AUTO_HOLD_MAX_MS)
     expire_ms = opened_ms + max(3600000, hold_max_ms)
@@ -2568,6 +2652,8 @@ def _auto_eval_record_status(record: Dict[str, Any], klines: List[Any], now_ms: 
                     realized += _auto_calc_pnl(side=side, entry_price=entry, exit_price=tp1, qty=take_qty)
                     rem_qty = max(0.0, rem_qty - take_qty)
                     tp1_hit = True
+                    sl = _auto_tp1_breakeven_stop(side=side, entry_price=entry, prev_stop=sl)
+                    state["be_stop_price"] = round(sl, 8)
                     changed_open = True
                     if hi >= tp2 and rem_qty > 0:
                         final_pnl = realized + _auto_calc_pnl(side=side, entry_price=entry, exit_price=tp2, qty=rem_qty)
@@ -2661,6 +2747,8 @@ def _auto_eval_record_status(record: Dict[str, Any], klines: List[Any], now_ms: 
                     realized += _auto_calc_pnl(side=side, entry_price=entry, exit_price=tp1, qty=take_qty)
                     rem_qty = max(0.0, rem_qty - take_qty)
                     tp1_hit = True
+                    sl = _auto_tp1_breakeven_stop(side=side, entry_price=entry, prev_stop=sl)
+                    state["be_stop_price"] = round(sl, 8)
                     changed_open = True
                     if lo <= tp2 and rem_qty > 0:
                         final_pnl = realized + _auto_calc_pnl(side=side, entry_price=entry, exit_price=tp2, qty=rem_qty)
@@ -2756,6 +2844,7 @@ def _auto_eval_record_status(record: Dict[str, Any], klines: List[Any], now_ms: 
                 "status": "OPEN",
                 "pnl_usdt": round(realized, 8),
                 "qty": round(rem_qty, 8),
+                "stop_loss_price": round(sl, 8),
                 "reason": _auto_reason_pack(
                     {
                         **state,
@@ -2763,6 +2852,7 @@ def _auto_eval_record_status(record: Dict[str, Any], klines: List[Any], now_ms: 
                         "tp1_hit": bool(tp1_hit),
                         "remaining_qty": rem_qty,
                         "realized_pnl_usdt": round(realized, 8),
+                        "be_stop_price": round(sl, 8),
                     }
                 ),
             },
@@ -3010,7 +3100,11 @@ async def _auto_apply_live_partial_close(
     realized_before = float(old_state.get("realized_pnl_usdt", record.get("pnl_usdt", 0.0)) or 0.0)
     realized_after = realized_before + _auto_calc_pnl(side=side, entry_price=entry, exit_price=avg_price, qty=exec_qty)
     rem_after = max(0.0, old_rem - exec_qty)
-    sl_price = float(record.get("stop_loss_price", 0.0) or 0.0)
+    sl_price = _auto_tp1_breakeven_stop(
+        side=side,
+        entry_price=entry,
+        prev_stop=float(record.get("stop_loss_price", 0.0) or 0.0),
+    )
     protect_info: Dict[str, Any] = {}
     protect_err = ""
     if rem_after > 0 and sl_price > 0:
@@ -3072,12 +3166,14 @@ async def _auto_apply_live_partial_close(
         "protect_sl_order_id": str(protect_info.get("order_id", "") or ""),
         "protect_sl_client_id": str(protect_info.get("client_order_id", "") or ""),
         "protect_sl_type": str(protect_info.get("type", "") or ""),
+        "be_stop_price": round(sl_price, 8),
         "last_exec_error": protect_err,
     }
     return {
         "status": "OPEN",
         "pnl_usdt": round(realized_after, 8),
         "qty": round(rem_after, 8),
+        "stop_loss_price": round(sl_price, 8),
         "reason": _auto_reason_pack(merged_state),
     }
 
@@ -5771,9 +5867,14 @@ async def _auto_eval_entry_candidate(
         flow_score=flow_score,
         flow_weight=float(whale_sentiment.get("flow_weight", _AUTO_FLOW_SCORE_WEIGHT) or _AUTO_FLOW_SCORE_WEIGHT),
     )
-    score_threshold = float(_AUTO_SIGNAL_SCORE_AGGR if mode_v == "aggressive" else _AUTO_SIGNAL_SCORE_BASE)
+    score_threshold = _auto_signal_score_threshold(symbol=symbol_u, regime=regime.regime, mode=mode_v)
     pass_signal_score = float(score_pack.get("total", 0.0) or 0.0) >= score_threshold
     pass_reversal_override = reversal_ready and float(score_pack.get("total", 0.0) or 0.0) >= max(45.0, score_threshold - 8.0)
+    trend_gate_ok, trend_gate_reason = _auto_trend_gate_pass(
+        regime=regime.regime,
+        diff=float(decision.get("diff", 0.0)),
+        confidence=confidence,
+    )
     signal_info.update(
         {
             "score": round(float(score_pack.get("total", 0.0) or 0.0), 4),
@@ -5783,6 +5884,7 @@ async def _auto_eval_entry_candidate(
             "score_mode": "aggressive" if mode_v == "aggressive" else "base",
             "reversal_ready": 1.0 if reversal_ready else 0.0,
             "flow_weight": round(float(score_pack.get("flow_weight", _AUTO_FLOW_SCORE_WEIGHT) or _AUTO_FLOW_SCORE_WEIGHT), 4),
+            "trend_gate": "PASS" if trend_gate_ok else trend_gate_reason,
         }
     )
 
@@ -5814,6 +5916,13 @@ async def _auto_eval_entry_candidate(
             "symbol": symbol_u,
             "signal": signal_info,
         }
+        if isinstance(preview_plan, dict):
+            out["plan"] = preview_plan
+        return out
+
+    if not trend_gate_ok:
+        preview_plan = _auto_plan_payload_for_side(_auto_pick_preview_side(trade_side, decision.get("side", "")))
+        out = {"ok": False, "action": "NO_SIGNAL", "reason": trend_gate_reason, "symbol": symbol_u, "signal": signal_info}
         if isinstance(preview_plan, dict):
             out["plan"] = preview_plan
         return out
@@ -5907,6 +6016,12 @@ async def _auto_eval_entry_candidate(
             "plan": plan_out,
         }
     rank_score = float(score_pack.get("total", 0.0) or 0.0) + abs(float(decision.get("diff", 0.0) or 0.0)) * 0.12 + confidence * 8.0
+    if str(regime.regime).upper() == "RANGE":
+        rank_score += 1.2
+    elif str(regime.regime).upper() == "HIGH_VOL":
+        rank_score += 0.8
+    elif str(regime.regime).upper() == "TREND":
+        rank_score -= 0.6
     if reversal_ready:
         rank_score += 2.0
     return {
