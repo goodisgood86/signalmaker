@@ -7908,6 +7908,13 @@ def spa_fallback(full_path: str):
     p = (full_path or "").lstrip("/")
     if p.startswith("api/") or p.startswith("ws/") or p.startswith("static/"):
         raise HTTPException(status_code=404, detail="not found")
+    if p:
+        path_obj = Path(p)
+        # Prevent scanner/probe paths like /.env or /.git from being treated as SPA routes.
+        if any(str(part).startswith(".") for part in path_obj.parts):
+            raise HTTPException(status_code=404, detail="not found")
+        if str(path_obj.suffix or "").strip():
+            raise HTTPException(status_code=404, detail="not found")
     index_path = Path("static/index.html")
     if not index_path.exists():
         raise HTTPException(status_code=404, detail="index not found")
