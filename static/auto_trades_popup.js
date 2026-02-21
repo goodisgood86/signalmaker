@@ -21,6 +21,7 @@ const cfgOrderSizeEl = document.getElementById("cfgOrderSize");
 const cfgDailyLossEl = document.getElementById("cfgDailyLoss");
 const cfgFuturesLeverageEl = document.getElementById("cfgFuturesLeverage");
 const cfgLeverageWrapEl = document.getElementById("cfgLeverageWrap");
+const cfgLeverageHintEl = document.getElementById("cfgLeverageHint");
 const cfgTpModeEl = document.getElementById("cfgTpMode");
 const cfgTpPctEl = document.getElementById("cfgTpPct");
 const cfgSlModeEl = document.getElementById("cfgSlMode");
@@ -186,7 +187,7 @@ function setTickStatusFromResponse(data) {
       reason === "SIGNAL_SCORE_LOW"
         ? "자동매매 대기: 신호 점수 미달"
         : reason === "SPOT_SELL_BLOCKED"
-          ? "자동매매 대기: 하락 우세지만 스팟 숏 금지"
+          ? "자동매매 대기: 숏 우세지만 스팟 숏 금지"
         : reason === "SIGNAL_SIDE_WAIT"
           ? "자동매매 대기: 방향 우위 미확정"
           : reason === "REVERSAL_NOT_READY"
@@ -276,12 +277,15 @@ function applyMarketSelection(market) {
   if (cfgMarketEl) cfgMarketEl.value = m;
   if (cfgMarketSelectEl) cfgMarketSelectEl.value = m;
   const isFutures = m === "futures";
-  if (cfgLeverageWrapEl) cfgLeverageWrapEl.hidden = !isFutures;
+  if (cfgLeverageWrapEl) cfgLeverageWrapEl.classList.toggle("is-disabled", !isFutures);
   if (cfgFuturesLeverageEl) {
     cfgFuturesLeverageEl.disabled = !isFutures;
-    if (!String(cfgFuturesLeverageEl.value || "").trim()) cfgFuturesLeverageEl.value = "3";
-    const lev = Math.max(1, Math.min(50, Math.round(Number(cfgFuturesLeverageEl.value || 3))));
-    cfgFuturesLeverageEl.value = String(lev);
+    if (isFutures) normalizeFuturesLeverageInput({ allowEmpty: false, fallback: 3 });
+  }
+  if (cfgLeverageHintEl) {
+    cfgLeverageHintEl.textContent = isFutures
+      ? "선물 마켓에서만 적용됩니다. (1~50배)"
+      : "spot 마켓에서는 선물 배수가 적용되지 않습니다.";
   }
 }
 
@@ -508,6 +512,30 @@ function clampNonNegativeInput(el) {
   if (!el) return;
   const n = Number(el.value);
   if (Number.isFinite(n) && n < 0) el.value = "0";
+}
+
+function normalizeFuturesLeverageInput({ allowEmpty = false, fallback = 3 } = {}) {
+  if (!cfgFuturesLeverageEl) return Math.max(1, Math.min(50, Math.round(Number(fallback) || 3)));
+  const raw = String(cfgFuturesLeverageEl.value || "").trim();
+  if (!raw) {
+    if (allowEmpty) {
+      cfgFuturesLeverageEl.value = "";
+      return NaN;
+    }
+    const lev = Math.max(1, Math.min(50, Math.round(Number(fallback) || 3)));
+    cfgFuturesLeverageEl.value = String(lev);
+    return lev;
+  }
+  const n = Number(raw);
+  if (!Number.isFinite(n)) {
+    if (allowEmpty) return NaN;
+    const lev = Math.max(1, Math.min(50, Math.round(Number(fallback) || 3)));
+    cfgFuturesLeverageEl.value = String(lev);
+    return lev;
+  }
+  const lev = Math.max(1, Math.min(50, Math.round(n)));
+  cfgFuturesLeverageEl.value = String(lev);
+  return lev;
 }
 
 function clampMaxOpenInput() {
@@ -1197,9 +1225,12 @@ if (cfgMarketSelectEl)
   });
 if (cfgFuturesLeverageEl)
   cfgFuturesLeverageEl.addEventListener("input", () => {
-    const lev = Math.max(1, Math.min(50, Math.round(Number(cfgFuturesLeverageEl.value || 3))));
-    cfgFuturesLeverageEl.value = String(lev);
+    normalizeFuturesLeverageInput({ allowEmpty: true, fallback: 3 });
     setConfigDirty(true);
+  });
+if (cfgFuturesLeverageEl)
+  cfgFuturesLeverageEl.addEventListener("blur", () => {
+    normalizeFuturesLeverageInput({ allowEmpty: false, fallback: 3 });
   });
 if (cfgTpModeEl)
   cfgTpModeEl.addEventListener("change", () => {

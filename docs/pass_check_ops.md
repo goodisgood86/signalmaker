@@ -21,13 +21,15 @@ source configs/ops.env
 ./scripts/pass_check_batch_runner.py \
   --base-url "$APP_BASE_URL" \
   --interval 5m \
-  --periods 24h,3d,7d
+  --periods 24h,3d,7d \
+  --seed-days 7
 ```
 
 - 기본 심볼
   - spot: `BTCUSDT,ETHUSDT,XRPUSDT,DOGEUSDT,SUIUSDT,SOLUSDT`
   - futures: `CROSSUSDT`
 - 이미 적재된 신호는 `pass_check_progress.last_signal_time_ms` 기준으로 건너뜁니다.
+- 초기 적재는 최근 7일만 반영합니다. 이후 주간 배치 시 신규 구간만 누적됩니다.
 
 ## 3) DB 백업
 
@@ -51,7 +53,7 @@ source configs/ops.env
 ./scripts/pass_check_backup.py --out-dir backups/pass_check
 
 # 2) 증분 배치
-./scripts/pass_check_batch_runner.py --base-url "$APP_BASE_URL" --interval 5m --periods 24h,3d,7d
+./scripts/pass_check_batch_runner.py --base-url "$APP_BASE_URL" --interval 5m --periods 24h,3d,7d --seed-days 7
 ```
 
 ## 5) 자동 실행 (cron)

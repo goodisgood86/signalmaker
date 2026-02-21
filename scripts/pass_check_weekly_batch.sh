@@ -63,5 +63,5 @@ if status != 200:
 print(f"[OK] health check: {url}")
 PY
 
-"$PY_BIN" ./scripts/pass_check_batch_runner.py --base-url "$BASE_URL" --interval 5m --periods 24h,3d,7d --seed-days 90
+"$PY_BIN" ./scripts/pass_check_batch_runner.py --base-url "$BASE_URL" --interval 5m --periods 24h,3d,7d --seed-days 7
 echo "[batch] done"

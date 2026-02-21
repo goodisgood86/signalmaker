@@ -443,6 +443,12 @@
         display: none;
         margin-top: 0;
       }
+      .cfg-field.is-disabled .cfg-label {
+        color: rgba(234, 243, 255, 0.58);
+      }
+      .cfg-field.is-disabled .cfg-mini {
+        color: rgba(234, 243, 255, 0.62);
+      }
       .cfg-actions {
         margin-top: 9px;
         display: grid;
@@ -676,6 +682,13 @@
         padding: 0 12px;
         font-size: 13px;
       }
+      input:disabled,
+      select:disabled {
+        opacity: 0.58;
+        filter: saturate(0.55);
+        cursor: not-allowed;
+        background: rgba(16, 28, 50, 0.54);
+      }
       button {
         font-weight: 760;
         cursor: pointer;
@@ -908,7 +921,7 @@
       <div class="config-inner">
       <div class="cfg-field">
         <div class="cfg-label">스캔 대상</div>
-        <div class="cfg-mini">리스트업된 코인 전체를 매 틱 검사하고, 진입 가능한 심볼에 자동 진입합니다.</div>
+        <div class="cfg-mini">분석 대상 코인을 라운드로빈으로 분할 스캔(틱당 2~3개)하고, 진입 가능한 심볼에 자동 진입 합니다.</div>
       </div>
       <div class="cfg-grid dual" style="margin-top:9px;">
         <div class="cfg-field">
@@ -918,9 +931,10 @@
             <option value="futures">futures (롱/숏)</option>
           </select>
         </div>
-        <div class="cfg-field" id="cfgLeverageWrap" hidden>
+        <div class="cfg-field" id="cfgLeverageWrap">
           <div class="cfg-label">선물 배수</div>
           <input id="cfgFuturesLeverage" type="number" min="1" max="50" step="1" placeholder="예: 5" />
+          <div id="cfgLeverageHint" class="cfg-mini">spot 마켓에서는 선물 배수가 적용되지 않습니다.</div>
         </div>
       </div>
       <div class="cfg-grid dual" style="margin-top:9px;">
@@ -1145,6 +1159,6 @@
         </div>
       </div>
     </div>
-    <script src="/static/auto_trades_popup.js?v=20260221d"></script>
+    <script src="/static/auto_trades_popup.js?v=20260221f"></script>
   </body>
 </html>

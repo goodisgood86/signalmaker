@@ -65,6 +65,7 @@ const entryPlanMetricsEl = document.getElementById("entryPlanMetrics");
 const entryLabelEl = document.getElementById("entryLabel");
 const targetLabelEl = document.getElementById("targetLabel");
 const stopLabelEl = document.getElementById("stopLabel");
+const targetDescEl = document.getElementById("targetDesc");
 const entryTableSwingEl = document.getElementById("entryTableSwing");
 const entryTableScenarioEl = document.getElementById("entryTableScenario");
 const entryFibLevelsEl = document.getElementById("entryFibLevels");
@@ -283,10 +284,16 @@ function setSwingBadge(kind, text) {
   if (kind) entrySwingBadgeEl.classList.add(kind);
 }
 
-function setTradeLabels() {
+function setTradeLabels(side = "WAIT") {
+  const s = String(side || "").toUpperCase();
   if (entryLabelEl) entryLabelEl.textContent = "진입 기준가";
   if (targetLabelEl) targetLabelEl.textContent = "진입 후 익절가(1차/2차)";
   if (stopLabelEl) stopLabelEl.textContent = "손절가";
+  if (targetDescEl) {
+    if (s === "SELL") targetDescEl.textContent = "진입가 이후 하락하여 익절을 고려하는 가격";
+    else if (s === "BUY") targetDescEl.textContent = "진입가 이후 상승하여 익절을 고려하는 가격";
+    else targetDescEl.textContent = "진입가 이후 목표 익절을 고려하는 가격";
+  }
 }
 
 function resetAnalysisUI(note = "코인 변경: 계산 중...") {
@@ -310,6 +317,7 @@ function resetAnalysisUI(note = "코인 변경: 계산 중...") {
   if (entryZoneEl) entryZoneEl.textContent = "-";
   if (targetZoneEl) targetZoneEl.textContent = "-";
   if (stopZoneEl) stopZoneEl.textContent = "-";
+  setTradeLabels("WAIT");
   if (entryPlanMetricsEl) entryPlanMetricsEl.textContent = "-";
   if (entryFibLevelsEl) entryFibLevelsEl.textContent = "-";
   if (entryFibZonesEl) entryFibZonesEl.textContent = "-";
@@ -767,7 +775,7 @@ function setAutoTickStatus(data) {
   if (action === "NO_SIGNAL") {
     const base =
       reason === "SPOT_SELL_BLOCKED"
-        ? "자동매매 대기: 하락 우세지만 스팟 숏 금지"
+        ? "자동매매 대기: 숏 우세지만 스팟 숏 금지"
         : reason === "BASIC_PASS_FAIL"
           ? "자동매매 대기: 확률 미PASS"
           : "자동매매 대기: 진입 신호 없음";
@@ -1256,6 +1264,18 @@ function normalizeTpZone(entryHi, a, b, minGapPct) {
   return { lo, hi };
 }
 
+function normalizeShortTpZone(entryLo, a, b, minGapPct) {
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return { lo: NaN, hi: NaN };
+  let lo = Math.min(a, b);
+  let hi = Math.max(a, b);
+  if (Number.isFinite(entryLo) && entryLo > 0) {
+    const maxHi = entryLo * (1 - minGapPct);
+    if (hi > maxHi) hi = maxHi;
+    if (lo >= hi) lo = hi * (1 - minGapPct);
+  }
+  return { lo, hi };
+}
+
 function buildTpText(t1Lo, t1Hi, t2Lo, t2Hi) {
   const line1 = Number.isFinite(t1Lo) && Number.isFinite(t1Hi) ? `1차 익절: ${formatPrice(t1Lo)} ~ ${formatPrice(t1Hi)} USDT` : "1차 익절: -";
   const line2 = Number.isFinite(t2Lo) && Number.isFinite(t2Hi) ? `2차 익절: ${formatPrice(t2Lo)} ~ ${formatPrice(t2Hi)} USDT` : "2차 익절: -";
@@ -1587,8 +1607,6 @@ function fmtYmd(ms) {
   return `${y}.${m}.${day}`;
 }
 
-const PASS_DB_MIN_WINDOW_MS = 90 * 24 * 60 * 60 * 1000; // 최소 3개월
-
 function syncAnalysisControls() {
   const mode = analysisModeEl ? analysisModeEl.value : "single";
   if (analysisIntervalEl) {
@@ -1755,14 +1773,14 @@ function renderExplainDetail(analysis, analysisMode) {
 
   if (pb?.buy?.label) {
     appendExplainRow(
-      "매수 % 해석",
+      "롱 % 해석",
       `현재 상태: ${pb.buy.pct}% (${pb.buy.label})\n의미: ${pb.buy.meaning}\n행동 가이드: ${pb.buy.action_hint || "-"}`
     );
   }
 
   if (pb?.sell?.label) {
     appendExplainRow(
-      "매도 % 해석",
+      "숏 % 해석",
       `현재 상태: ${pb.sell.pct}% (${pb.sell.label})\n의미: ${pb.sell.meaning}\n행동 가이드: ${pb.sell.action_hint || "-"}`
     );
   }
@@ -1944,27 +1962,28 @@ function renderActionSummary(analysis, fibPlan) {
     sideSignal = "WAIT";
   }
   if (sideSignal === "WAIT") side = "WAIT";
-  setTradeLabels();
+  let sideForPlan = spotSellBlocked ? "SELL" : side;
+  setTradeLabels(sideForPlan);
 
   if (side === "BUY") {
-    actionBadgeEl.textContent = "매수 우세";
+    actionBadgeEl.textContent = "롱 우세";
     actionBadgeEl.className = "action-badge buy";
     if (nearTie && hasFibSwing) {
-      actionTitleEl.textContent = "확률은 동률에 가깝지만 스윙 보정으로 매수 우위입니다.";
-      actionSubtitleEl.textContent = `확률: 매수 ${buy.toFixed(2)}% / 하락 ${sell.toFixed(2)}%, 스윙 보정: +${Math.abs(
+      actionTitleEl.textContent = "확률은 동률에 가깝지만 스윙 보정으로 롱 우위입니다.";
+      actionSubtitleEl.textContent = `확률: 롱 ${buy.toFixed(2)}% / 숏 ${sell.toFixed(2)}%, 스윙 보정: +${Math.abs(
         swingBias
       ).toFixed(1)}%p`;
     } else {
-      actionTitleEl.textContent = "지금은 매수 쪽이 유리합니다.";
+      actionTitleEl.textContent = "지금은 롱 쪽이 유리합니다.";
       actionSubtitleEl.textContent =
-        "추세/모멘텀 합의가 매수 방향입니다. 다만 고변동 구간이면 분할 진입이 안전합니다.";
+        "추세/모멘텀 합의가 롱 방향입니다. 다만 고변동 구간이면 분할 진입이 안전합니다.";
     }
   } else if (side === "SELL") {
-    actionBadgeEl.textContent = "하락 우세";
+    actionBadgeEl.textContent = "숏 우세";
     actionBadgeEl.className = "action-badge sell";
     if (nearTie && hasFibSwing) {
-      actionTitleEl.textContent = "확률은 동률에 가깝지만 스윙 보정으로 하락 우위입니다.";
-      actionSubtitleEl.textContent = `확률: 매수 ${buy.toFixed(2)}% / 하락 ${sell.toFixed(2)}%, 스윙 보정: -${Math.abs(
+      actionTitleEl.textContent = "확률은 동률에 가깝지만 스윙 보정으로 숏 우위입니다.";
+      actionSubtitleEl.textContent = `확률: 롱 ${buy.toFixed(2)}% / 숏 ${sell.toFixed(2)}%, 스윙 보정: -${Math.abs(
         swingBias
       ).toFixed(1)}%p`;
     } else {
@@ -1975,7 +1994,7 @@ function renderActionSummary(analysis, fibPlan) {
     actionBadgeEl.textContent = "관망";
     actionBadgeEl.className = "action-badge wait";
     actionTitleEl.textContent = spotSellBlocked
-      ? "하락 우세지만 스팟 숏 금지로 자동매매는 대기입니다."
+      ? "숏 우세지만 스팟 숏 금지로 자동매매는 대기입니다."
       : mtfConflict
       ? "상위 타임프레임 방향 충돌로 관망입니다."
       : swingConflict
@@ -1987,7 +2006,7 @@ function renderActionSummary(analysis, fibPlan) {
       ? "4h/1h 방향이 다릅니다. 상위 프레임이 정렬될 때까지 신규진입을 보류합니다."
       : swingConflict
         ? "확률은 한쪽 우위지만 피보 스윙이 반대입니다. 방향이 정렬될 때까지 대기하세요."
-        : "매수/매도 우위 차이가 아직 작습니다. 우위가 커질 때까지 대기하세요.";
+        : "롱/숏 우위 차이가 아직 작습니다. 우위가 커질 때까지 대기하세요.";
   }
 
   const top = Array.isArray(rows)
@@ -2004,9 +2023,9 @@ function renderActionSummary(analysis, fibPlan) {
     else whaleStateEl.textContent = whaleLabel || "중립";
   }
   let verdict = "그래서 관망이 유리합니다.";
-  if (spotSellBlocked) verdict = "그래서 하락 우세지만 스팟 숏 금지로 자동매매는 대기입니다.";
-  if (side === "BUY") verdict = "그래서 매수 우세로 판단합니다.";
-  if (side === "SELL") verdict = "그래서 하락 우세로 판단합니다.";
+  if (spotSellBlocked) verdict = "그래서 숏 우세지만 스팟 숏 금지로 자동매매는 대기입니다.";
+  if (side === "BUY") verdict = "그래서 롱 우세로 판단합니다.";
+  if (side === "SELL") verdict = "그래서 숏 우세로 판단합니다.";
 
   let entryTxt = "-";
   let targetTxt = "-";
@@ -2052,7 +2071,7 @@ function renderActionSummary(analysis, fibPlan) {
       if (fibPlan.isUpMove) {
         entryTableSwingEl.textContent = "상승 추세 스윙 (L→H)";
         setSwingBadge("up", "스윙 상태: 상승 추세");
-      } else if (side === "BUY") {
+      } else if (sideForPlan === "BUY") {
         entryTableSwingEl.textContent = "하락 후 반등 시도 (역추세)";
         setSwingBadge("neutral", "스윙 상태: 하락 후 반등");
       } else {
@@ -2061,7 +2080,7 @@ function renderActionSummary(analysis, fibPlan) {
       }
     }
 
-    if (side === "BUY") {
+    if (sideForPlan === "BUY") {
       if (fibPlan.isUpMove) {
         const entry = Number.isFinite(buyP) ? buyP : p0618;
         entryLo = Math.min(p05, p0618);
@@ -2103,32 +2122,37 @@ function renderActionSummary(analysis, fibPlan) {
         fibZonesTxt = fmtFibZones(fmtZoneSorted(p0, p0236), fmtZoneSorted(p0236, p0382));
         if (entryTableScenarioEl) entryTableScenarioEl.textContent = "하락 이후 기술적 반등만 짧게 노리는 보수 시나리오";
       }
-    } else if (side === "SELL") {
-      // 현물 매도 우세에서도 재진입 참고 구간은 숫자로 노출한다.
-      const base0 = Number.isFinite(p0) ? p0 : Number.isFinite(safeClose) ? safeClose * 0.996 : NaN;
-      const base0236 = Number.isFinite(p0236) ? p0236 : Number.isFinite(base0) ? base0 * 1.002 : NaN;
-      const base0382 = Number.isFinite(p0382) ? p0382 : Number.isFinite(base0236) ? base0236 * 1.002 : NaN;
-      const base05 = Number.isFinite(p05) ? p05 : Number.isFinite(base0382) ? base0382 * 1.002 : NaN;
-      const reentryLo = Math.min(base0, base0236);
-      const reentryHi = Math.max(base0, base0236);
-      const tp1 = normalizeTpZone(reentryHi, base0236, base0382, tp1GapPct);
-      const tp2 = normalizeTpZone(reentryHi, base0382, base05, tp2GapPct);
-      const stopFloor = reentryLo * (1 - stopGapPct);
-      const stop = Number.isFinite(base0) ? Math.min(base0 * 0.997, stopFloor) : stopFloor;
-      entryLo = reentryLo;
-      entryHi = reentryHi;
+    } else if (sideForPlan === "SELL") {
+      const entryA = Number.isFinite(p05) ? p05 : Number.isFinite(p0382) ? p0382 : Number.isFinite(p0236) ? p0236 : safeClose;
+      const entryB = Number.isFinite(p0618) ? p0618 : Number.isFinite(p05) ? p05 : entryA * (1 + tp1GapPct);
+      entryLo = Math.min(entryA, entryB);
+      entryHi = Math.max(entryA, entryB);
+      const t1Low = Number.isFinite(p0) ? p0 : entryLo * (1 - tp1GapPct * 1.2);
+      const t1High = Number.isFinite(p0236) ? p0236 : entryLo * (1 - tp1GapPct);
+      const tp1 = normalizeShortTpZone(entryLo, t1Low, t1High, tp1GapPct);
+      const t2Low = Number.isFinite(p0) ? p0 * (1 - tp2GapPct) : entryLo * (1 - tp2GapPct * 1.5);
+      const t2High = Number.isFinite(p0) ? p0 : entryLo * (1 - tp1GapPct * 1.2);
+      const tp2 = normalizeShortTpZone(entryLo, t2Low, t2High, tp2GapPct);
+      const stopCeil = entryHi * (1 + stopGapPct);
+      const stop = Number.isFinite(p0786) ? Math.max(p0786, stopCeil) : stopCeil;
       targetLo = tp1.lo;
       targetHi = tp1.hi;
       target2Lo = tp2.lo;
       target2Hi = tp2.hi;
       stopPx = stop;
-      entryTxt = fmtZoneSorted(reentryLo, reentryHi);
+      entryTxt = fmtZoneSorted(entryLo, entryHi);
       targetTxt = buildTpText(tp1.lo, tp1.hi, tp2.lo, tp2.hi);
       stopTxt = fmtOne(stop);
-      readGuide = "읽는 법: 현물 매도 우세는 비중축소가 우선이며, 아래 진입구간은 재진입 참고용입니다.";
-      fibMeaning = `${swingTxt} 기준(현물 비중축소 우선, 재진입 참고 구간 표시)`;
-      fibZonesTxt = fmtFibZones(fmtZoneSorted(reentryLo, reentryHi), fmtZoneSorted(tp1.lo, tp1.hi));
-      if (entryTableScenarioEl) entryTableScenarioEl.textContent = "현물 비중축소 후 재진입 조건을 확인하는 시나리오";
+      readGuide = fibPlan.isUpMove
+        ? "읽는 법: 상승 스윙에서 숏은 역추세 시도이므로 보수적으로 짧게 대응합니다."
+        : "읽는 법: 하락 스윙 지속 숏은 되돌림(0.5~0.618)에서 진입 후 저점권(0.236~0.0)에서 분할 정리합니다.";
+      fibMeaning = fibPlan.isUpMove ? `${swingTxt} 기준(상단 저항 역추세 숏 시도)` : `${swingTxt} 기준(되돌림 숏 -> 저점 정리)`;
+      fibZonesTxt = fmtFibZones(fmtZoneSorted(entryLo, entryHi), fmtZoneSorted(tp1.lo, tp1.hi));
+      if (entryTableScenarioEl) {
+        entryTableScenarioEl.textContent = fibPlan.isUpMove
+          ? "상승 스윙에서 저항 반응을 이용한 역추세 숏 시나리오"
+          : "하락 스윙 지속에서 되돌림 구간 숏 진입 후 저점 분할 정리 시나리오";
+      }
     } else {
       if (fibPlan.isUpMove) {
         entryLo = Math.min(p05, p0618);
@@ -2183,9 +2207,11 @@ function renderActionSummary(analysis, fibPlan) {
       actionBadgeEl.textContent = "반전 롱 후보";
       actionBadgeEl.className = "action-badge buy";
       actionTitleEl.textContent = "하락 스윙 바닥권에서 반전 롱 조건이 확인됐습니다.";
-      actionSubtitleEl.textContent = "0.0~0.236 터치 후 0.236 위 종가 회복 + 매수 우위 + 신뢰도 조건 충족";
+      actionSubtitleEl.textContent = "0.0~0.236 터치 후 0.236 위 종가 회복 + 롱 우위 + 신뢰도 조건 충족";
     }
   }
+  sideForPlan = spotSellBlocked ? "SELL" : side;
+  setTradeLabels(sideForPlan);
 
   entryZoneEl.textContent = entryTxt;
   targetZoneEl.textContent = targetTxt;
@@ -2199,7 +2225,7 @@ function renderActionSummary(analysis, fibPlan) {
   const fibTol = Number.isFinite(close) ? close * params.fibTolPct : 0;
   const passFib =
     Number.isFinite(entryLo) && Number.isFinite(entryHi) && Number.isFinite(close)
-      ? side === "SELL"
+      ? sideForPlan === "SELL"
         ? close >= entryLo - fibTol && close <= entryHi + fibTol * 1.6
         : close >= entryLo - fibTol * 1.2 && close <= entryHi + fibTol
       : false;
@@ -2227,13 +2253,13 @@ function renderActionSummary(analysis, fibPlan) {
   if (stepProbDetailEl) {
     const sideForDisplay = spotSellBlocked ? "SELL" : side;
     const sidePct = sideForDisplay === "SELL" ? sell : buy;
-    const sideLabel = sideForDisplay === "SELL" ? "하락" : "매수";
+    const sideLabel = sideForDisplay === "SELL" ? "숏" : "롱";
     if (spotSellBlocked) {
-      stepProbDetailEl.textContent = `확률: 매수 ${buy.toFixed(2)}% / 하락 ${sell.toFixed(2)}% | 신뢰도 ${(conf * 100).toFixed(
+      stepProbDetailEl.textContent = `확률: 롱 ${buy.toFixed(2)}% / 숏 ${sell.toFixed(2)}% | 신뢰도 ${(conf * 100).toFixed(
         1
-      )}%\n상태: 하락 우세이나 스팟 숏 금지로 자동매매 대기`;
+      )}%\n상태: 숏 우세이나 스팟 숏 금지로 자동매매 대기`;
     } else if (swingConflict && !reversalOverride) {
-      stepProbDetailEl.textContent = `확률: 매수 ${buy.toFixed(2)}% / 하락 ${sell.toFixed(2)}% | 신뢰도 ${(conf * 100).toFixed(
+      stepProbDetailEl.textContent = `확률: 롱 ${buy.toFixed(2)}% / 숏 ${sell.toFixed(2)}% | 신뢰도 ${(conf * 100).toFixed(
         1
       )}%\n상태: 스윙 정방향 불일치(하락 스윙 예외 미충족)`;
     } else {
@@ -2248,7 +2274,7 @@ function renderActionSummary(analysis, fibPlan) {
       ];
       if (!passSignal) lines.push("미통과: 신호 점수 부족");
       if (passSignalAgg && !passSignalBase) lines.push("참고: 공격모드 기준점수(58)에서만 통과");
-      if (reversalReady) lines.push("하락 스윙 예외 충족: 바닥(0.0~0.236) 터치 후 종가 회복 + 매수우위 + 신뢰도");
+      if (reversalReady) lines.push("하락 스윙 예외 충족: 바닥(0.0~0.236) 터치 후 종가 회복 + 롱우위 + 신뢰도");
       stepProbDetailEl.textContent = lines.join("\n");
     }
   }
@@ -2264,30 +2290,44 @@ function renderActionSummary(analysis, fibPlan) {
   const entryMid = zoneMid(entryLo, entryHi);
   const targetMid = zoneMid(targetLo, targetHi);
   const rr =
-    Number.isFinite(entryMid) && Number.isFinite(targetMid) && Number.isFinite(stopPx) && entryMid > stopPx
-      ? (targetMid - entryMid) / (entryMid - stopPx)
-      : NaN;
+    sideForPlan === "SELL"
+      ? Number.isFinite(entryMid) && Number.isFinite(targetMid) && Number.isFinite(stopPx) && stopPx > entryMid
+        ? (entryMid - targetMid) / (stopPx - entryMid)
+        : NaN
+      : Number.isFinite(entryMid) && Number.isFinite(targetMid) && Number.isFinite(stopPx) && entryMid > stopPx
+        ? (targetMid - entryMid) / (entryMid - stopPx)
+        : NaN;
   const minTpPass = Math.max(0.01, tp1GapPct * 0.55);
   const minStopPass = Math.max(0.006, stopGapPct * 0.7);
   const passPlan =
     Number.isFinite(entryMid) &&
     Number.isFinite(targetMid) &&
     Number.isFinite(stopPx) &&
-    targetMid > entryMid * (1 + minTpPass) &&
-    stopPx < entryMid * (1 - minStopPass) &&
+    (sideForPlan === "SELL"
+      ? targetMid < entryMid * (1 - minTpPass) && stopPx > entryMid * (1 + minStopPass)
+      : targetMid > entryMid * (1 + minTpPass) && stopPx < entryMid * (1 - minStopPass)) &&
       (!Number.isFinite(rr) || rr >= 0.9);
   const passExecBase = passSignalBase && passRegime && passFib && passPlan && reactionPass && !lowVolumeBlock;
   const passExecAgg = passSignalAgg && passRegime && passFib && passPlan && reactionPass && !lowVolumeBlock;
   const passExec = passExecBase || passExecAgg;
   if (entryPlanMetricsEl) {
     if (Number.isFinite(entryMid) && Number.isFinite(targetMid) && Number.isFinite(stopPx) && entryMid > 0) {
-      const upPct = ((targetMid / entryMid) - 1) * 100;
       const maxTpMid = zoneMid(target2Lo, target2Hi);
-      const maxUpPct = Number.isFinite(maxTpMid) ? ((maxTpMid / entryMid) - 1) * 100 : upPct;
-      const downPct = ((entryMid / stopPx) - 1) * 100;
-      entryPlanMetricsEl.textContent = `예상 수익 : +${upPct.toFixed(2)}%\n예상 손실 : -${downPct.toFixed(2)}%\nPR : ${
-        Number.isFinite(rr) ? rr.toFixed(2) : "-"
-      }\n최대 예상 수익 : +${maxUpPct.toFixed(2)}% (2차)`;
+      if (sideForPlan === "SELL") {
+        const downPct = targetMid > 0 ? ((entryMid / targetMid) - 1) * 100 : NaN;
+        const maxDownPct = Number.isFinite(maxTpMid) && maxTpMid > 0 ? ((entryMid / maxTpMid) - 1) * 100 : downPct;
+        const upRiskPct = ((stopPx / entryMid) - 1) * 100;
+        entryPlanMetricsEl.textContent = `예상 수익 : +${(Number.isFinite(downPct) ? downPct : 0).toFixed(2)}%\n예상 손실 : -${upRiskPct.toFixed(2)}%\nPR : ${
+          Number.isFinite(rr) ? rr.toFixed(2) : "-"
+        }\n최대 예상 수익 : +${(Number.isFinite(maxDownPct) ? maxDownPct : 0).toFixed(2)}% (2차)`;
+      } else {
+        const upPct = ((targetMid / entryMid) - 1) * 100;
+        const maxUpPct = Number.isFinite(maxTpMid) ? ((maxTpMid / entryMid) - 1) * 100 : upPct;
+        const downPct = ((entryMid / stopPx) - 1) * 100;
+        entryPlanMetricsEl.textContent = `예상 수익 : +${upPct.toFixed(2)}%\n예상 손실 : -${downPct.toFixed(2)}%\nPR : ${
+          Number.isFinite(rr) ? rr.toFixed(2) : "-"
+        }\n최대 예상 수익 : +${maxUpPct.toFixed(2)}% (2차)`;
+      }
     } else {
       entryPlanMetricsEl.textContent = "-";
     }
@@ -2315,7 +2355,7 @@ function renderActionSummary(analysis, fibPlan) {
   if (decisionFinalEl) {
     if (spotSellBlocked) {
       if (stepFinalStatusEl) setStepStatus(stepFinalStatusEl, false);
-      decisionFinalEl.textContent = "하락 우세지만 스팟 숏 금지로 자동매매는 진입 대기";
+      decisionFinalEl.textContent = "숏 우세지만 스팟 숏 금지로 자동매매는 진입 대기";
     } else if (swingConflict && !reversalOverride) {
       if (stepFinalStatusEl) setStepStatus(stepFinalStatusEl, false);
       decisionFinalEl.textContent = "하락 스윙 예외 미충족으로 진입 보류";
@@ -2331,8 +2371,8 @@ function renderActionSummary(analysis, fibPlan) {
       if (stepFinalStatusEl) setStepStatus(stepFinalStatusEl, false);
       decisionFinalEl.textContent =
         side === "SELL"
-          ? "하락 우세: 피보 진입구간(하단~상단) 도달 대기"
-          : "매수 우위: 피보 진입구간(하단~상단) 도달 대기";
+          ? "숏 우세: 피보 진입구간(하단~상단) 도달 대기"
+          : "롱 우위: 피보 진입구간(하단~상단) 도달 대기";
     } else if (passSignalAgg && !passSignalBase) {
       if (stepFinalStatusEl) setStepStatus(stepFinalStatusEl, false);
       decisionFinalEl.textContent = "공격모드 기준점수(58) 통과, 기본모드 기준점수(70)는 대기";
@@ -2348,7 +2388,7 @@ function renderActionSummary(analysis, fibPlan) {
     if (reversalOverride) positionStateEl.textContent = "하락추세 반등 롱";
     else if (side === "BUY") positionStateEl.textContent = "롱";
     else if (side === "SELL") positionStateEl.textContent = "숏";
-    else if (spotSellBlocked) positionStateEl.textContent = "숏 신호(현물 대기)";
+    else if (spotSellBlocked) positionStateEl.textContent = "숏";
     else positionStateEl.textContent = "관망";
   }
   if (actionReadGuideEl) actionReadGuideEl.textContent = readGuide;
@@ -2383,15 +2423,15 @@ function renderActionSummary(analysis, fibPlan) {
     const setupTxt = reversalOverride
       ? "반전 바닥 롱"
       : spotSellBlocked
-        ? "하락 우세(스팟 숏 금지)"
+        ? "숏 우세(스팟 숏 금지)"
         : side === "BUY"
           ? "추세/반등 롱"
           : side === "SELL"
-            ? "하락 우세"
+            ? "숏 우세"
             : "관망";
     actionExplainEl.textContent =
       `[현재 값]\n` +
-      `- 매수 ${buy.toFixed(2)}% / 매도 ${sell.toFixed(2)}% (원차이 ${rawDiff >= 0 ? "+" : ""}${rawDiff.toFixed(2)}%p, 피보보정 ${
+      `- 롱 ${buy.toFixed(2)}% / 숏 ${sell.toFixed(2)}% (원차이 ${rawDiff >= 0 ? "+" : ""}${rawDiff.toFixed(2)}%p, 피보보정 ${
         swingBias >= 0 ? "+" : ""
       }${swingBias.toFixed(2)}%p, 반영차이 ${diff >= 0 ? "+" : ""}${diff.toFixed(2)}%p)\n` +
       `- 신뢰도 ${(conf * 100).toFixed(1)}% (지표 일치도)\n` +
@@ -2945,18 +2985,15 @@ async function loadPassCheck(symbol, market, analysisMode, analysisInterval) {
     const firstSignalMs = Number(data?.first_signal_time_ms || 0);
     const latestSignalMs = Number(data?.latest_signal_time_ms || 0);
     const updatedMs = Number(data?.updated_ms || 0);
-    // 검증구간은 코인별 신호 발생 시점이 아니라, DB 적재 기준 3개월 고정 구간으로 표기한다.
-    const endMs = updatedMs > 0 ? updatedMs : latestSignalMs;
-    const startMs = endMs > 0 ? Math.max(0, endMs - PASS_DB_MIN_WINDOW_MS) : 0;
+    // 검증구간은 DB에 적재된 실제 신호 범위(최초~최신)로 표기한다.
+    const endMs = latestSignalMs > 0 ? latestSignalMs : updatedMs;
+    const startMs = firstSignalMs > 0 ? firstSignalMs : 0;
     const rangeText = startMs > 0 && endMs > 0 ? `${fmtYmd(startMs)} ~ ${fmtYmd(endMs)}` : bars > 0 ? `최근 ${bars}봉 (${interval})` : "-";
     const periodLabel = periodCfg.period === "24h" ? "24시간" : periodCfg.period === "7d" ? "7일" : "3일";
-    const flowWeightRaw = Number(data?.flow_weight);
-    const flowWeight = Number.isFinite(flowWeightRaw) ? Math.max(0.2, Math.min(0.3, flowWeightRaw)) : 0.25;
-    const flowNote = `플로우 가중 ${(flowWeight * 100).toFixed(0)}%(taker/OI/top-trader/funding, 현재값 고정)`;
     const modeNote =
       analysisMode === "mtf"
-        ? `MTF는 5m 기준 · 진입 후 ${periodLabel} 내 손절 없이 익절 달성만 집계 · ${flowNote}`
-        : `${interval} 기준 · 진입 후 ${periodLabel} 내 손절 없이 익절 달성만 집계 · ${flowNote}`;
+        ? `MTF는 5m 기준 · 진입 후 ${periodLabel} 내 손절 없이 익절 달성만 집계`
+        : `${interval} 기준 · 진입 후 ${periodLabel} 내 손절 없이 익절 달성만 집계`;
     const nextPayload = {
       modeNote,
       barsText: rangeText,

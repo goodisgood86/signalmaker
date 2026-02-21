@@ -245,6 +245,7 @@ _AUTO_ALLOWED_RECORD_STATUS = {"OPEN", "TP", "SL", "CLOSED_FAIL"}
 _AUTO_LINK_STATUS = {"CONNECTED"}
 _AUTO_SYMBOL_SCAN_ORDER = ["BTCUSDT", "ETHUSDT", "XRPUSDT", "DOGEUSDT", "SUIUSDT", "SOLUSDT", "CROSSUSDT"]
 _AUTO_ALLOWED_SYMBOLS = set(_AUTO_SYMBOL_SCAN_ORDER)
+_AUTO_SCAN_BATCH_SIZE = max(2, min(3, int(str(os.getenv("AUTO_SCAN_BATCH_SIZE", "3")) or "3")))
 _AUTH_COOKIE_NAME = "coin_auth_session"
 _AUTH_SESSION_TTL_S = max(1800, int(str(os.getenv("APP_AUTH_SESSION_TTL_S", "43200")) or "43200"))
 _AUTH_SESSIONS_MAX = max(64, int(str(os.getenv("APP_AUTH_SESSIONS_MAX", "512")) or "512"))
@@ -271,6 +272,7 @@ _AUTO_AUDIT_DROP_COUNT = 0
 _KST_OFFSET_MS = 9 * 60 * 60 * 1000
 _AUTO_LOG = logging.getLogger("coin.auto_trade")
 _AUTO_RUNTIME_STATE: Dict[int, Dict[str, Any]] = {}
+_AUTO_SCAN_CURSOR: Dict[str, int] = {}
 _AUTO_BINANCE_BAN_UNTIL_MS = 0
 _AUTO_COLLATERAL_CACHE_TTL_S = max(
     10.0, float(str(os.getenv("AUTO_COLLATERAL_CACHE_TTL_S", "30")) or "30")
@@ -311,7 +313,7 @@ _AUTO_WS_PRICE_TASKS: List[asyncio.Task] = []
 _AUTO_WHALE_SENTIMENT_CACHE: Dict[str, Dict[str, Any]] = {}
 _AUTO_WHALE_SENTIMENT_TTL_S = max(
     10.0,
-    float(str(os.getenv("AUTO_WHALE_SENTIMENT_TTL_S", "45")) or "45"),
+    float(str(os.getenv("AUTO_WHALE_SENTIMENT_TTL_S", "120")) or "120"),
 )
 
 
@@ -1388,6 +1390,7 @@ def _calc_pass_check_from_df(
             "resolved_tp1_hit_rate": 0.0,
             "samples": [],
             "events": [],
+            "scan_last_signal_time_ms": 0,
         }
 
     pass_cnt = 0
@@ -1400,6 +1403,7 @@ def _calc_pass_check_from_df(
     samples: List[Dict[str, Any]] = []
     events: List[Dict[str, Any]] = []
     mtf_map = _build_mtf_side_lookup_from_5m(df) if (use_mtf_gate and interval == "5m") else {}
+    scan_last_signal_time_ms = int(df["open_time_ms"].iloc[end - 1]) if end - 1 >= 0 else 0
 
     step = max(1, int(signal_step))
     scan_span = max(0, end - start)
@@ -1454,10 +1458,9 @@ def _calc_pass_check_from_df(
             market=market,
             mode="balanced",
             swing_is_up=is_up,
+            allow_spot_sell=(market == "spot"),
         )
         decision_side = str(decision.get("side", "WAIT")).upper()
-        if market == "spot" and decision_side == "SELL":
-            decision_side = "WAIT"
 
         if decision_side != "WAIT" and mtf_map:
             s1 = _lookup_side_at_or_before(mtf_map.get("1h_t", []), mtf_map.get("1h_s", []), signal_time_ms)
@@ -1692,6 +1695,7 @@ def _calc_pass_check_from_df(
         "resolved_tp1_hit_rate": round(resolved_win_rate, 4),
         "samples": samples,
         "events": events,
+        "scan_last_signal_time_ms": int(scan_last_signal_time_ms),
         "flow_score": round(float(flow_score), 4),
         "flow_weight": round(float(flow_weight), 4),
     }
@@ -2019,6 +2023,17 @@ def _auto_symbol_scan_list(market: str) -> List[str]:
     return list(_AUTO_SYMBOL_SCAN_ORDER)
 
 
+def _auto_symbol_scan_batch(*, user_id: int, market: str, symbols: List[str]) -> List[str]:
+    pool = [str(s).upper().strip() for s in symbols if str(s).strip()]
+    if len(pool) <= _AUTO_SCAN_BATCH_SIZE:
+        return pool
+    key = f"{max(0, int(user_id))}:{str(market or '').lower().strip()}"
+    start = int(_AUTO_SCAN_CURSOR.get(key, 0) or 0) % len(pool)
+    out = [pool[(start + i) % len(pool)] for i in range(_AUTO_SCAN_BATCH_SIZE)]
+    _AUTO_SCAN_CURSOR[key] = (start + _AUTO_SCAN_BATCH_SIZE) % len(pool)
+    return out
+
+
 def _auto_int_or_none(v: Any) -> int | None:
     try:
         n = int(v)
@@ -2199,6 +2214,7 @@ def _auto_decide_signal(
     market: str,
     mode: str,
     swing_is_up: Optional[bool],
+    allow_spot_sell: bool = False,
 ) -> Dict[str, Any]:
     params = _auto_apply_mode_relax(_decision_params_by_regime(regime, symbol), mode)
     raw_diff = float(buy_pct) - float(sell_pct)
@@ -2218,7 +2234,7 @@ def _auto_decide_signal(
         side = "WAIT"
     if str(regime).upper() == "HIGH_VOL" and confidence < params["pass_regime_conf"] and abs(diff) < params["pass_regime_diff"]:
         side = "WAIT"
-    if market == "spot" and side == "SELL":
+    if market == "spot" and side == "SELL" and (not bool(allow_spot_sell)):
         side = "WAIT"
     if swing_is_up is True and side == "SELL":
         side = "WAIT"
@@ -6052,9 +6068,12 @@ async def _auto_trade_tick_core(
         futures_leverage = int(cfg.get("futures_leverage", 1) or 1)
         if market != "futures":
             futures_leverage = 1
-        scan_symbols = _auto_symbol_scan_list(market)
+        scan_pool = _auto_symbol_scan_list(market)
+        scan_symbols = list(scan_pool)
         if cfg_symbol != "ALL":
             scan_symbols = [cfg_symbol]
+        else:
+            scan_symbols = _auto_symbol_scan_batch(user_id=user_id, market=market, symbols=scan_pool)
         picked: Dict[str, Any] | None = None
         scan_notes: List[Dict[str, Any]] = []
         for scan_symbol in scan_symbols:
@@ -7466,9 +7485,9 @@ async def api_pass_check_batch(
     periods = [str(p) for p in periods if str(p) in {"24h", "3d", "7d"}]
     if not periods:
         periods = ["24h", "3d", "7d"]
-    seed_days = int(payload.get("seed_days", 90) or 90)
-    seed_days = max(30, min(seed_days, 3660))
-    bootstrap_year = bool(payload.get("bootstrap_year", True))
+    seed_days = int(payload.get("seed_days", 7) or 7)
+    seed_days = max(7, min(seed_days, 3660))
+    bootstrap_year = bool(payload.get("bootstrap_year", False))
     bootstrap_signal_step = int(payload.get("bootstrap_signal_step", 12) or 12)
     bootstrap_signal_step = max(1, min(bootstrap_signal_step, 48))
     initial_signal_step = int(payload.get("initial_signal_step", 3) or 3)
@@ -7563,9 +7582,9 @@ async def api_pass_check_batch(
                     flow_weight=pass_flow_weight,
                 )
                 events = calc.get("events", [])
+                max_signal_ms = max(last_signal_ms, int(calc.get("scan_last_signal_time_ms", 0) or 0))
                 if events:
                     body = []
-                    max_signal_ms = last_signal_ms
                     for e in events:
                         stm = int(e.get("signal_time_ms", 0) or 0)
                         if stm <= 0:
@@ -7590,28 +7609,29 @@ async def api_pass_check_batch(
                         )
                     if body:
                         await _sb_request("POST", "/rest/v1/pass_check_events", json_body=body)
-                        if progress:
-                            await _sb_request(
-                                "PATCH",
-                                "/rest/v1/pass_check_progress",
-                                params={"id": f"eq.{progress.get('id')}"},
-                                json_body={"last_signal_time_ms": max_signal_ms, "updated_ms": now_ms},
-                            )
-                        else:
-                            await _sb_request(
-                                "POST",
-                                "/rest/v1/pass_check_progress",
-                                json_body=[
-                                    {
-                                        "symbol": sym,
-                                        "market": used_market,
-                                        "interval": interval,
-                                        "period": period,
-                                        "last_signal_time_ms": max_signal_ms,
-                                        "updated_ms": now_ms,
-                                    }
-                                ],
-                            )
+                if max_signal_ms > 0 and max_signal_ms > last_signal_ms:
+                    if progress:
+                        await _sb_request(
+                            "PATCH",
+                            "/rest/v1/pass_check_progress",
+                            params={"id": f"eq.{progress.get('id')}"},
+                            json_body={"last_signal_time_ms": max_signal_ms, "updated_ms": now_ms},
+                        )
+                    else:
+                        await _sb_request(
+                            "POST",
+                            "/rest/v1/pass_check_progress",
+                            json_body=[
+                                {
+                                    "symbol": sym,
+                                    "market": used_market,
+                                    "interval": interval,
+                                    "period": period,
+                                    "last_signal_time_ms": max_signal_ms,
+                                    "updated_ms": now_ms,
+                                }
+                            ],
+                        )
                 # summary는 이벤트 원본 기준으로 매번 재집계(드리프트 방지)
                 try:
                     await _pc_refresh_summary_from_events(sym, used_market, interval, period)

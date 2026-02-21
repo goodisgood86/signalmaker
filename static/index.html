@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>SignalMaker</title>
-    <link rel="stylesheet" href="/static/style.css?v=20260221c" />
+    <link rel="stylesheet" href="/static/style.css?v=20260221e" />
     <script src="https://unpkg.com/lightweight-charts@4.2.1/dist/lightweight-charts.standalone.production.js"></script>
   </head>
   <body>
@@ -115,11 +115,11 @@
             </div>
             <div class="prob">
               <div class="prob-item">
-                <div class="prob-label">매수 % <span class="tip" tabindex="0" data-tip="1) 시그널 점수를 0~100%로 변환한 값&#10;2) 높을수록 매수 우위">?</span></div>
+                <div class="prob-label">롱 % <span class="tip" tabindex="0" data-tip="1) 시그널 점수를 0~100%로 변환한 값&#10;2) 높을수록 롱 우위">?</span></div>
                 <div class="prob-value" id="buyPct">-</div>
               </div>
               <div class="prob-item">
-                <div class="prob-label">매도 % <span class="tip" tabindex="0" data-tip="1) 매수와 반대 방향 점수&#10;2) 높을수록 매도/리스크축소 우위">?</span></div>
+                <div class="prob-label">숏 % <span class="tip" tabindex="0" data-tip="1) 롱과 반대 방향 점수&#10;2) 높을수록 숏/리스크축소 우위">?</span></div>
                 <div class="prob-value" id="sellPct">-</div>
               </div>
               <div class="prob-item">
@@ -241,7 +241,7 @@
                 <div class="entry-row">
                   <div class="entry-k" id="targetLabel">진입 후 익절가(1차/2차)</div>
                   <div class="entry-v" id="targetZone">-</div>
-                  <div class="entry-d">진입가 이후 상승하여 익절을 고려하는 가격</div>
+                  <div class="entry-d" id="targetDesc">진입가 이후 목표 익절을 고려하는 가격</div>
                 </div>
                 <div class="entry-row">
                   <div class="entry-k" id="stopLabel">손절가</div>
@@ -320,6 +320,6 @@
       </footer>
     </div>
 
-    <script src="/static/app.js?v=20260221e"></script>
+    <script src="/static/app.js?v=20260221i"></script>
   </body>
 </html>
