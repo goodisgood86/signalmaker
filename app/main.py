@@ -4274,12 +4274,12 @@ def _auto_client_id(prefix: str, *parts: Any) -> str:
 
 def _auto_is_duplicate_order_error(detail: str) -> bool:
     d = str(detail or "").lower()
-    return "duplicate" in d or "already exists" in d or "-2010" in d
+    return "duplicate" in d or "already exists" in d or "-2010" in d or "-20132" in d
 
 
 def _auto_is_unknown_order_error(detail: str) -> bool:
     d = str(detail or "").lower()
-    return "unknown order" in d or "order does not exist" in d or "-2011" in d
+    return "unknown order" in d or "order does not exist" in d or "-2011" in d or "-2013" in d
 
 
 def _auto_is_algo_endpoint_required_error(detail: str) -> bool:
@@ -4290,12 +4290,26 @@ def _auto_is_algo_endpoint_required_error(detail: str) -> bool:
 def _auto_normalize_futures_algo_order(row: Dict[str, Any]) -> Dict[str, Any]:
     algo_id = str(row.get("algoId", row.get("orderId", "")) or "")
     client_algo_id = str(row.get("clientAlgoId", row.get("clientOrderId", "")) or "")
-    status = str(row.get("status", "") or "").upper() or "NEW"
+    algo_status = str(row.get("algoStatus", row.get("status", "")) or "").upper() or "NEW"
+    status_map = {
+        "NEW": "NEW",
+        "WORKING": "NEW",
+        "PENDING": "NEW",
+        "TRIGGERED": "FILLED",
+        "EXECUTED": "FILLED",
+        "FILLED": "FILLED",
+        "CANCELED": "CANCELED",
+        "EXPIRED": "EXPIRED",
+        "REJECTED": "REJECTED",
+        "FAILED": "REJECTED",
+    }
+    status = status_map.get(algo_status, algo_status)
     qty = str(row.get("executedQty", row.get("cumQty", row.get("quantity", row.get("origQty", "0")))) or "0")
     return {
         "orderId": algo_id,
         "clientOrderId": client_algo_id,
         "status": status,
+        "algoStatus": algo_status,
         "type": str(row.get("type", row.get("origType", "")) or ""),
         "origType": str(row.get("origType", row.get("type", "")) or ""),
         "executedQty": qty,
@@ -4319,9 +4333,30 @@ async def _auto_fetch_futures_algo_order_by_client_id(
 ) -> Dict[str, Any]:
     sym = str(symbol or "").upper().strip()
     cid = str(client_order_id or "").strip()
-    if not sym or not cid:
-        raise HTTPException(status_code=400, detail="symbol/client_order_id is required")
+    if not cid:
+        raise HTTPException(status_code=400, detail="client_order_id is required")
 
+    # 1) 단건 조회 우선 (권장)
+    try:
+        body = await _auto_binance_signed_call(
+            base_url=BINANCE_FUTURES_BASE_URL,
+            path="/fapi/v1/algoOrder",
+            api_key=api_key,
+            api_secret=api_secret,
+            method="GET",
+            extra_params={"clientAlgoId": cid},
+        )
+        if isinstance(body, dict):
+            return _auto_normalize_futures_algo_order(body)
+    except HTTPException as e:
+        detail = str(getattr(e, "detail", "") or "")
+        if not _auto_is_unknown_order_error(detail):
+            raise
+
+    if not sym:
+        raise HTTPException(status_code=400, detail="binance api 실패: -2011: Unknown order sent.")
+
+    # 2) open/historical 조회 폴백
     async def _query(path: str, extra: Dict[str, Any] | None = None) -> List[Dict[str, Any]]:
         params: Dict[str, Any] = {"symbol": sym}
         if isinstance(extra, dict):
@@ -4338,12 +4373,12 @@ async def _auto_fetch_futures_algo_order_by_client_id(
             return [dict(x) for x in body if isinstance(x, dict)]
         return []
 
-    open_rows = await _query("/fapi/v1/openAlgoOrders")
+    open_rows = await _query("/fapi/v1/openAlgoOrders", {"algoType": "CONDITIONAL"})
     for row in open_rows:
         if str(row.get("clientAlgoId", row.get("clientOrderId", "")) or "") == cid:
             return _auto_normalize_futures_algo_order(row)
 
-    hist_rows = await _query("/fapi/v1/historicalAlgoOrders", {"limit": 100})
+    hist_rows = await _query("/fapi/v1/allAlgoOrders", {"limit": 100})
     for row in hist_rows:
         if str(row.get("clientAlgoId", row.get("clientOrderId", "")) or "") == cid:
             return _auto_normalize_futures_algo_order(row)
@@ -4783,7 +4818,7 @@ async def _auto_cancel_order(
             detail = str(getattr(e, "detail", "") or "")
             if not _auto_is_unknown_order_error(detail) and not _auto_is_algo_endpoint_required_error(detail):
                 raise
-            algo_params: Dict[str, Any] = {"symbol": sym}
+            algo_params: Dict[str, Any] = {}
             if oid:
                 algo_params["algoId"] = oid
             if cid:
@@ -4959,16 +4994,17 @@ async def _auto_place_protective_stop_order(
     cid = str(client_order_id or "").strip()
     if m == "futures":
         algo_params: Dict[str, Any] = {
+            "algoType": "CONDITIONAL",
             "symbol": sym,
             "side": s,
             "type": "STOP_MARKET",
             "reduceOnly": "true",
             "quantity": qty_str,
-            "stopPrice": stop_str,
+            "triggerPrice": stop_str,
             "workingType": "MARK_PRICE",
         }
         if cid:
-            algo_params["newClientAlgoOrderId"] = cid
+            algo_params["clientAlgoId"] = cid
         try:
             body = await _auto_binance_signed_call(
                 base_url=BINANCE_FUTURES_BASE_URL,
