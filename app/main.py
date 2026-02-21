@@ -4248,6 +4248,19 @@ def _auto_decimal_floor_step(value: float, step: float) -> float:
     return out
 
 
+def _auto_decimal_to_str(value: float, step: float = 0.0) -> str:
+    v = float(value)
+    if not math.isfinite(v) or v <= 0:
+        return ""
+    dv = Decimal(str(v))
+    s = float(step)
+    if math.isfinite(s) and s > 0:
+        ds = Decimal(str(s))
+        dv = (dv / ds).to_integral_value(rounding=ROUND_DOWN) * ds
+    out = format(dv, "f").rstrip("0").rstrip(".")
+    return out if out else "0"
+
+
 def _auto_client_id(prefix: str, *parts: Any) -> str:
     p = re.sub(r"[^a-z0-9]", "", str(prefix or "").lower())[:6] or "o"
     raw = "|".join(str(x or "") for x in parts)
@@ -4433,6 +4446,10 @@ async def _auto_fetch_symbol_trade_rules(*, market: str, symbol: str) -> Dict[st
     if not isinstance(filters, list):
         filters = []
 
+    lot_step_size = 0.0
+    lot_min_qty = 0.0
+    market_step_size = 0.0
+    market_min_qty = 0.0
     step_size = 0.0
     min_qty = 0.0
     min_notional = 0.0
@@ -4447,10 +4464,16 @@ async def _auto_fetch_symbol_trade_rules(*, market: str, symbol: str) -> Dict[st
                 min_v = float(f.get("minQty", 0.0) or 0.0)
             except Exception:
                 continue
-            if step_v > 0 and (step_size <= 0 or step_v < step_size):
-                step_size = step_v
-            if min_v > 0 and (min_qty <= 0 or min_v > min_qty):
-                min_qty = min_v
+            if ft == "MARKET_LOT_SIZE":
+                if step_v > 0:
+                    market_step_size = step_v
+                if min_v > 0:
+                    market_min_qty = min_v
+            else:
+                if step_v > 0:
+                    lot_step_size = step_v
+                if min_v > 0:
+                    lot_min_qty = min_v
         elif ft in {"MIN_NOTIONAL", "NOTIONAL"}:
             try:
                 n_v = float(f.get("minNotional", f.get("notional", 0.0)) or 0.0)
@@ -4465,6 +4488,15 @@ async def _auto_fetch_symbol_trade_rules(*, market: str, symbol: str) -> Dict[st
                 t_v = 0.0
             if t_v > 0:
                 tick_size = t_v
+    # 시장가/스탑-마켓 주문은 MARKET_LOT_SIZE가 더 엄격할 수 있어,
+    # 정밀도 초과(-1111) 방지를 위해 더 큰 step(더 거친 단위) 기준으로 맞춘다.
+    candidates_step = [v for v in (lot_step_size, market_step_size) if v > 0]
+    if candidates_step:
+        step_size = max(candidates_step)
+    candidates_min_qty = [v for v in (lot_min_qty, market_min_qty) if v > 0]
+    if candidates_min_qty:
+        min_qty = max(candidates_min_qty)
+
     if step_size <= 0:
         step_size = 1e-8
     if min_qty <= 0:
@@ -4676,7 +4708,7 @@ async def _auto_place_market_order(
         raise HTTPException(status_code=400, detail="order quantity is below minQty")
     if min_notional > 0 and fallback_price > 0 and (qty_norm * fallback_price) + 1e-8 < min_notional:
         raise HTTPException(status_code=400, detail="order notional is below minNotional")
-    qty_str = format(qty_norm, ".16f").rstrip("0").rstrip(".")
+    qty_str = _auto_decimal_to_str(qty_norm, step_size)
     if not qty_str:
         raise HTTPException(status_code=400, detail="invalid normalized quantity")
 
@@ -4763,8 +4795,8 @@ async def _auto_place_protective_stop_order(
     stop_norm = max(0.0, stop_norm)
     if stop_norm <= 0:
         raise HTTPException(status_code=400, detail="protective stop price normalization failed")
-    qty_str = format(qty_norm, ".16f").rstrip("0").rstrip(".")
-    stop_str = format(stop_norm, ".16f").rstrip("0").rstrip(".")
+    qty_str = _auto_decimal_to_str(qty_norm, step_size)
+    stop_str = _auto_decimal_to_str(stop_norm, tick_size)
     cid = str(client_order_id or "").strip()
     if m == "futures":
         try:
