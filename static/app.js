@@ -2950,10 +2950,13 @@ async function loadPassCheck(symbol, market, analysisMode, analysisInterval) {
     const startMs = endMs > 0 ? Math.max(0, endMs - PASS_DB_MIN_WINDOW_MS) : 0;
     const rangeText = startMs > 0 && endMs > 0 ? `${fmtYmd(startMs)} ~ ${fmtYmd(endMs)}` : bars > 0 ? `최근 ${bars}봉 (${interval})` : "-";
     const periodLabel = periodCfg.period === "24h" ? "24시간" : periodCfg.period === "7d" ? "7일" : "3일";
+    const flowWeightRaw = Number(data?.flow_weight);
+    const flowWeight = Number.isFinite(flowWeightRaw) ? Math.max(0.2, Math.min(0.3, flowWeightRaw)) : 0.25;
+    const flowNote = `플로우 가중 ${(flowWeight * 100).toFixed(0)}%(taker/OI/top-trader/funding, 현재값 고정)`;
     const modeNote =
       analysisMode === "mtf"
-        ? `MTF는 5m 기준 · 진입 후 ${periodLabel} 내 손절 없이 익절 달성만 집계`
-        : `${interval} 기준 · 진입 후 ${periodLabel} 내 손절 없이 익절 달성만 집계`;
+        ? `MTF는 5m 기준 · 진입 후 ${periodLabel} 내 손절 없이 익절 달성만 집계 · ${flowNote}`
+        : `${interval} 기준 · 진입 후 ${periodLabel} 내 손절 없이 익절 달성만 집계 · ${flowNote}`;
     const nextPayload = {
       modeNote,
       barsText: rangeText,

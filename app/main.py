@@ -1054,6 +1054,9 @@ def _build_pass_check_payload(
     latest_signal_time_ms: int,
     updated_ms: int,
     source: str,
+    flow_weight: float = _AUTO_FLOW_SCORE_WEIGHT,
+    flow_score: float = 0.0,
+    flow_source: str = "fixed_current",
 ) -> Dict[str, Any]:
     p = int(pass_count)
     e = int(executed_count)
@@ -1079,6 +1082,9 @@ def _build_pass_check_payload(
         "first_signal_time_ms": int(first_signal_time_ms),
         "latest_signal_time_ms": int(latest_signal_time_ms),
         "updated_ms": int(updated_ms),
+        "flow_weight": round(float(flow_weight), 4),
+        "flow_score": round(float(flow_score), 4),
+        "flow_source": str(flow_source or "fixed_current"),
     }
 
 
@@ -1362,6 +1368,8 @@ def _calc_pass_check_from_df(
     use_mtf_gate: bool = False,
     use_volume_filter: bool = True,
     use_reaction_entry: bool = True,
+    flow_score: float = 0.0,
+    flow_weight: float = _AUTO_FLOW_SCORE_WEIGHT,
 ) -> Dict[str, Any]:
     start = 220
     end = len(df) - int(horizon_bars) - 1
@@ -1499,7 +1507,8 @@ def _calc_pass_check_from_df(
             swing_conflict=score_swing_conflict,
             low_volume_block=low_volume_block,
             reversal_ready=reversal_ready,
-            flow_score=0.0,
+            flow_score=float(flow_score),
+            flow_weight=float(flow_weight),
         )
         score_threshold = float(_AUTO_SIGNAL_SCORE_BASE)
         pass_signal_score = float(score_pack.get("total", 0.0) or 0.0) >= score_threshold
@@ -1683,6 +1692,8 @@ def _calc_pass_check_from_df(
         "resolved_tp1_hit_rate": round(resolved_win_rate, 4),
         "samples": samples,
         "events": events,
+        "flow_score": round(float(flow_score), 4),
+        "flow_weight": round(float(flow_weight), 4),
     }
 
 
@@ -7289,6 +7300,14 @@ async def api_pass_check_db(
     symbol_u = symbol.upper()
     market_u = market.lower()
     interval_u = interval if interval in ALLOWED_INTERVALS else "5m"
+    ref_flow_score = 0.0
+    ref_flow_weight = float(_AUTO_FLOW_SCORE_WEIGHT)
+    try:
+        whale_ref = await _auto_fetch_whale_sentiment(symbol=symbol_u)
+        ref_flow_score = float(whale_ref.get("flow_score", whale_ref.get("score", 0.0)) or 0.0)
+        ref_flow_weight = float(whale_ref.get("flow_weight", _AUTO_FLOW_SCORE_WEIGHT) or _AUTO_FLOW_SCORE_WEIGHT)
+    except Exception:
+        pass
     # 1) 요청 interval 요약 통계만 조회 (5m 강제 대체 금지)
     try:
         summary = await _pc_get_summary(symbol_u, market_u, interval_u, period)
@@ -7335,6 +7354,9 @@ async def api_pass_check_db(
             latest_signal_time_ms=latest_signal_time_ms,
             updated_ms=int(summary.get("updated_ms", 0) or 0),
             source="db_summary",
+            flow_score=ref_flow_score,
+            flow_weight=ref_flow_weight,
+            flow_source="current_fixed_ref",
         )
 
     # 2) 요약이 없으면 기존 이벤트 집계로 fallback
@@ -7390,6 +7412,9 @@ async def api_pass_check_db(
         latest_signal_time_ms=base_latest_signal,
         updated_ms=int(time() * 1000),
         source="db_events_fallback",
+        flow_score=ref_flow_score,
+        flow_weight=ref_flow_weight,
+        flow_source="current_fixed_ref",
     )
     # fallback 집계 결과를 summary로 시드 (실패해도 본 응답은 반환)
     try:
@@ -7493,12 +7518,22 @@ async def api_pass_check_batch(
                         "seed_days": int(seed_days),
                         "bootstrap_year": bool(bootstrap_year),
                         "bootstrap_signal_step": 0,
+                        "flow_score": 0.0,
+                        "flow_weight": round(float(_AUTO_FLOW_SCORE_WEIGHT), 4),
                         "error": f"symbol_init_failed:{type(e).__name__}",
                     }
                 )
             _compact_runtime_memory()
             continue
         df = _klines_to_df(klines)
+        pass_flow_score = 0.0
+        pass_flow_weight = float(_AUTO_FLOW_SCORE_WEIGHT)
+        try:
+            whale_ctx = await _auto_fetch_whale_sentiment(symbol=sym)
+            pass_flow_score = float(whale_ctx.get("flow_score", whale_ctx.get("score", 0.0)) or 0.0)
+            pass_flow_weight = float(whale_ctx.get("flow_weight", _AUTO_FLOW_SCORE_WEIGHT) or _AUTO_FLOW_SCORE_WEIGHT)
+        except Exception:
+            pass
 
         for period in periods:
             try:
@@ -7523,6 +7558,8 @@ async def api_pass_check_batch(
                     use_mtf_gate=use_mtf_gate,
                     use_volume_filter=True,
                     use_reaction_entry=True,
+                    flow_score=pass_flow_score,
+                    flow_weight=pass_flow_weight,
                 )
                 events = calc.get("events", [])
                 if events:
@@ -7590,6 +7627,8 @@ async def api_pass_check_batch(
                         "seed_days": int(seed_days),
                         "bootstrap_year": bool(bootstrap_year),
                         "bootstrap_signal_step": int(signal_step),
+                        "flow_score": round(float(pass_flow_score), 4),
+                        "flow_weight": round(float(pass_flow_weight), 4),
                     }
                 )
             except Exception as e:
@@ -7604,6 +7643,8 @@ async def api_pass_check_batch(
                         "seed_days": int(seed_days),
                         "bootstrap_year": bool(bootstrap_year),
                         "bootstrap_signal_step": 0,
+                        "flow_score": round(float(pass_flow_score), 4),
+                        "flow_weight": round(float(pass_flow_weight), 4),
                         "error": f"period_failed:{type(e).__name__}",
                     }
                 )

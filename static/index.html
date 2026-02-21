@@ -171,7 +171,7 @@
             </div>
             <div class="decision-box">
               <div class="decision-title">자동매매와 동일 로직: 신호 점수 → 피보나치 기반 체결 → 실행/안전필터</div>
-              <div class="decision-note">메인 피보 가격은 분석 참고용이며, 자동매매 피보 가격은 서버 tick 기준 실집행 값입니다.</div>
+              <div class="decision-note">신호점수는 플로우 점수(taker/OI/top-trader/funding, 가중 20~30%)를 포함합니다. 메인 피보 가격은 참고용이며 자동매매 피보 가격은 서버 tick 기준 실집행 값입니다.</div>
               <div class="decision-steps">
                 <div class="decision-step">
                   <div class="decision-step-k">1) 신호 점수</div>
@@ -320,6 +320,6 @@
       </footer>
     </div>
 
-    <script src="/static/app.js?v=20260221d"></script>
+    <script src="/static/app.js?v=20260221e"></script>
   </body>
 </html>
