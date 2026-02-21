@@ -294,9 +294,9 @@ _AUTO_ENTRY_ZONE_BREAK_MAX_PCT = max(
     0.0,
     min(0.08, float(str(os.getenv("AUTO_ENTRY_ZONE_BREAK_MAX_PCT", "0.01")) or "0.01")),
 )
-_AUTO_MIN_ENTRY_RR = max(0.2, min(3.0, float(str(os.getenv("AUTO_MIN_ENTRY_RR", "1.0")) or "1.0")))
-_AUTO_SIGNAL_SCORE_BASE = max(30.0, min(95.0, float(str(os.getenv("AUTO_SIGNAL_SCORE_BASE", "70")) or "70")))
-_AUTO_SIGNAL_SCORE_AGGR = max(20.0, min(90.0, float(str(os.getenv("AUTO_SIGNAL_SCORE_AGGR", "58")) or "58")))
+_AUTO_MIN_ENTRY_RR = max(0.2, min(3.0, float(str(os.getenv("AUTO_MIN_ENTRY_RR", "0.9")) or "0.9")))
+_AUTO_SIGNAL_SCORE_BASE = max(30.0, min(95.0, float(str(os.getenv("AUTO_SIGNAL_SCORE_BASE", "55")) or "55")))
+_AUTO_SIGNAL_SCORE_AGGR = max(20.0, min(90.0, float(str(os.getenv("AUTO_SIGNAL_SCORE_AGGR", "48")) or "48")))
 _AUTO_REVERSAL_CONF_MIN = max(0.1, min(0.9, float(str(os.getenv("AUTO_REVERSAL_CONF_MIN", "0.28")) or "0.28")))
 _AUTO_FLOW_SCORE_WEIGHT = max(0.2, min(0.3, float(str(os.getenv("AUTO_FLOW_SCORE_WEIGHT", "0.25")) or "0.25")))
 _AUTO_WS_PRICE_ENABLED = str(os.getenv("AUTO_WS_PRICE_ENABLED", "1")).strip().lower() not in {"0", "false", "no", "off"}
@@ -1519,11 +1519,6 @@ def _calc_pass_check_from_df(
         )
 
         trade_side = decision_side if decision_side in {"BUY", "SELL"} else "WAIT"
-        if swing_conflict:
-            if reversal_ready:
-                trade_side = "BUY"
-            else:
-                trade_side = "WAIT"
         if trade_side == "WAIT" and reversal_ready:
             trade_side = "BUY"
 
@@ -2232,11 +2227,6 @@ def _auto_decide_signal(
         side = "WAIT"
     if str(regime).upper() == "HIGH_VOL" and confidence < params["pass_regime_conf"] and abs(diff) < params["pass_regime_diff"]:
         side = "WAIT"
-    if swing_is_up is True and side == "SELL":
-        side = "WAIT"
-    if swing_is_up is False and side == "BUY":
-        side = "WAIT"
-
     pass_prob = (
         side == "BUY"
         and buy_pct >= params["prob_min_pct"]
@@ -2275,9 +2265,9 @@ def _auto_side_matches_swing(side: str, swing_is_up: bool) -> bool:
 def _auto_pick_aggressive_side(*, buy_pct: float, sell_pct: float, market: str) -> str:
     b = float(buy_pct)
     s = float(sell_pct)
-    if b >= 60.0 and b > s:
+    if b >= 55.0 and b > s:
         return "BUY"
-    if s >= 60.0 and s > b:
+    if s >= 55.0 and s > b:
         return "SELL"
     return "WAIT"
 
@@ -5794,11 +5784,6 @@ async def _auto_eval_entry_candidate(
     )
 
     trade_side = decision_side if decision_side in {"BUY", "SELL"} else "WAIT"
-    if swing_conflict:
-        if reversal_ready:
-            trade_side = "BUY"
-        else:
-            trade_side = "WAIT"
     if trade_side == "WAIT" and reversal_ready:
         trade_side = "BUY"
 

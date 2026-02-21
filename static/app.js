@@ -1947,7 +1947,6 @@ function renderActionSummary(analysis, fibPlan) {
   if (hasFibSwing) {
     if (swingUp && sideSignal === "SELL") swingConflict = true;
     if (!swingUp && sideSignal === "BUY") swingConflict = true;
-    if (swingConflict) side = "WAIT";
   }
 
   // 신뢰도가 극단적으로 낮으면 방향 차이가 커도 관망으로 처리한다.
@@ -2033,8 +2032,8 @@ function renderActionSummary(analysis, fibPlan) {
   let reversalReady = false;
   let reversalOverride = false;
   const lowVolumeBlock = String(latestVolumeStates?.["5m"] || latestVolumeStates?.single || "").includes("평균 이하");
-  const scoreThresholdBase = 70;
-  const scoreThresholdAggressive = 58;
+  const scoreThresholdBase = 55;
+  const scoreThresholdAggressive = 48;
 
   if (fibPlan && Number.isFinite(close)) {
     const buyP = Number(fibPlan.buyPrice);
@@ -2241,25 +2240,20 @@ function renderActionSummary(analysis, fibPlan) {
     const sideForDisplay = side;
     const sidePct = sideForDisplay === "SELL" ? sell : buy;
     const sideLabel = sideForDisplay === "SELL" ? "숏" : "롱";
-    if (swingConflict && !reversalOverride) {
-      stepProbDetailEl.textContent = `확률: 롱 ${buy.toFixed(2)}% / 숏 ${sell.toFixed(2)}% | 신뢰도 ${(conf * 100).toFixed(
+    const lines = [
+      `방향: ${sideLabel} ${sidePct.toFixed(2)}% (보정 ${swingBiasTxt}) | 신뢰도 ${(conf * 100).toFixed(1)}% | 레짐: ${regimeTxt}`,
+      `점수: ${signalScore.total.toFixed(1)} / 100 (기본 ${scoreThresholdBase}, 공격 ${scoreThresholdAggressive})`,
+      `구성: 우위 ${signalScore.edge.toFixed(1)} · 신뢰 ${signalScore.conf.toFixed(1)} · 레짐 ${signalScore.regime.toFixed(
         1
-      )}%\n상태: 스윙 정방향 불일치(하락 스윙 예외 미충족)`;
-    } else {
-      const lines = [
-        `방향: ${sideLabel} ${sidePct.toFixed(2)}% (보정 ${swingBiasTxt}) | 신뢰도 ${(conf * 100).toFixed(1)}% | 레짐: ${regimeTxt}`,
-        `점수: ${signalScore.total.toFixed(1)} / 100 (기본 ${scoreThresholdBase}, 공격 ${scoreThresholdAggressive})`,
-        `구성: 우위 ${signalScore.edge.toFixed(1)} · 신뢰 ${signalScore.conf.toFixed(1)} · 레짐 ${signalScore.regime.toFixed(
-          1
-        )} · 방향 ${signalScore.side.toFixed(1)} · 피보 ${signalScore.fib.toFixed(1)} · 모멘텀 ${signalScore.momentum.toFixed(1)} · 플로우 ${signalScore.flow.toFixed(1)}`,
-        `고래/플로우: ${whaleLabel}${Number.isFinite(flowScore) ? ` (${flowScore >= 0 ? "+" : ""}${flowScore.toFixed(2)})` : ""} · 가중치 ${(flowWeight * 100).toFixed(0)}%`,
-        "규칙: 공격모드는 기준점수만 완화, 안전필터(담보/일손실/손절무효)는 동일 적용",
-      ];
-      if (!passSignal) lines.push("미통과: 신호 점수 부족");
-      if (passSignalAgg && !passSignalBase) lines.push("참고: 공격모드 기준점수(58)에서만 통과");
-      if (reversalReady) lines.push("하락 스윙 예외 충족: 바닥(0.0~0.236) 터치 후 종가 회복 + 롱우위 + 신뢰도");
-      stepProbDetailEl.textContent = lines.join("\n");
-    }
+      )} · 방향 ${signalScore.side.toFixed(1)} · 피보 ${signalScore.fib.toFixed(1)} · 모멘텀 ${signalScore.momentum.toFixed(1)} · 플로우 ${signalScore.flow.toFixed(1)}`,
+      `고래/플로우: ${whaleLabel}${Number.isFinite(flowScore) ? ` (${flowScore >= 0 ? "+" : ""}${flowScore.toFixed(2)})` : ""} · 가중치 ${(flowWeight * 100).toFixed(0)}%`,
+      "규칙: 공격모드는 기준점수만 완화, 안전필터(담보/일손실/손절무효)는 동일 적용",
+    ];
+    if (!passSignal) lines.push("미통과: 신호 점수 부족");
+    if (passSignalAgg && !passSignalBase) lines.push("참고: 공격모드 기준점수(48)에서만 통과");
+    if (swingConflict && !reversalOverride) lines.push("주의: 스윙 역방향 진입(점수 페널티 반영)");
+    if (reversalReady) lines.push("하락 스윙 예외 충족: 바닥(0.0~0.236) 터치 후 종가 회복 + 롱우위 + 신뢰도");
+    stepProbDetailEl.textContent = lines.join("\n");
   }
   setStepStatus(stepFibStatusEl, passFib);
   if (stepFibDetailEl) {
@@ -2336,17 +2330,18 @@ function renderActionSummary(analysis, fibPlan) {
     }
   }
   if (decisionFinalEl) {
-    if (swingConflict && !reversalOverride) {
-      if (stepFinalStatusEl) setStepStatus(stepFinalStatusEl, false);
-      decisionFinalEl.textContent = "하락 스윙 예외 미충족으로 진입 보류";
-    } else if (passExec && side === "BUY") {
+    if (passExec && side === "BUY") {
       if (stepFinalStatusEl) setStepStatus(stepFinalStatusEl, true);
       decisionFinalEl.textContent = reversalOverride
         ? "하락 스윙 예외 충족: 반전 롱 실행 가능 구간"
-        : "피보 진입구간 터치 시 분할 진입 가능 구간";
-    } else if (side === "SELL" && passSignal && passRegime) {
+        : swingConflict
+          ? "역추세 롱: 피보 진입구간 터치 시 보수적 분할 진입 가능"
+          : "피보 진입구간 터치 시 분할 진입 가능 구간";
+    } else if (passExec && side === "SELL") {
       if (stepFinalStatusEl) setStepStatus(stepFinalStatusEl, true);
-      decisionFinalEl.textContent = "숏 우세: 피보 진입구간 터치 시 분할 진입 가능 구간";
+      decisionFinalEl.textContent = swingConflict
+        ? "역추세 숏: 피보 진입구간 터치 시 보수적 분할 진입 가능"
+        : "숏 우세: 피보 진입구간 터치 시 분할 진입 가능 구간";
     } else if (passSignal && passRegime && !passFib) {
       if (stepFinalStatusEl) setStepStatus(stepFinalStatusEl, false);
       decisionFinalEl.textContent =
@@ -2355,7 +2350,7 @@ function renderActionSummary(analysis, fibPlan) {
           : "롱 우위: 피보 진입구간(하단~상단) 도달 대기";
     } else if (passSignalAgg && !passSignalBase) {
       if (stepFinalStatusEl) setStepStatus(stepFinalStatusEl, false);
-      decisionFinalEl.textContent = "공격모드 기준점수(58) 통과, 기본모드 기준점수(70)는 대기";
+      decisionFinalEl.textContent = "공격모드 기준점수(48) 통과, 기본모드 기준점수(55)는 대기";
     } else if (side === "SELL") {
       if (stepFinalStatusEl) setStepStatus(stepFinalStatusEl, false);
       decisionFinalEl.textContent = "숏 우세: 진입 조건 재확인 후 대기";
