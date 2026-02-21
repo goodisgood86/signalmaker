@@ -2212,7 +2212,7 @@ function renderActionSummary(analysis, fibPlan) {
   if (stepFibDetailEl) {
     stepFibDetailEl.textContent =
       Number.isFinite(entryLo) && Number.isFinite(entryHi)
-        ? `현재가: ${formatPrice(close)}\n피보 진입구간(entry_lo~entry_hi): ${formatPrice(entryLo)} ~ ${formatPrice(entryHi)} USDT\n허용오차: ±${formatPrice(
+        ? `현재가: ${formatPrice(close)}\n피보 진입구간(하단~상단): ${formatPrice(entryLo)} ~ ${formatPrice(entryHi)} USDT\n허용오차: ±${formatPrice(
             fibTol
           )}`
         : "피보 진입구간 계산 대기";
@@ -2255,7 +2255,7 @@ function renderActionSummary(analysis, fibPlan) {
       .replace("2차 익절:", "2차 익절 :");
     if (passExec) {
       const modeHint = passExecBase ? "기본/공격 공통 통과" : "공격모드 점수 기준 통과";
-      stepExecDetailEl.textContent = `진입: 피보 진입구간(entry_lo~entry_hi) 터치 시 체결\n진입 기준가: ${entryTxt}\n${tpExecTxt}\n손절가: ${stopTxt}\n실행모드: ${modeHint}`;
+      stepExecDetailEl.textContent = `진입: 피보 진입구간(하단~상단) 터치 시 체결\n진입 기준가: ${entryTxt}\n${tpExecTxt}\n손절가: ${stopTxt}\n실행모드: ${modeHint}`;
     } else if (lowVolumeBlock) {
       stepExecDetailEl.textContent = "실행 대기\n사유: 모멘텀 약화(거래량 평균 이하)";
     } else if (!reactionPass) {
@@ -2287,8 +2287,8 @@ function renderActionSummary(analysis, fibPlan) {
       if (stepFinalStatusEl) setStepStatus(stepFinalStatusEl, false);
       decisionFinalEl.textContent =
         side === "SELL"
-          ? "하락 우세: 피보 진입구간(entry_lo~entry_hi) 도달 대기"
-          : "매수 우위: 피보 진입구간(entry_lo~entry_hi) 도달 대기";
+          ? "하락 우세: 피보 진입구간(하단~상단) 도달 대기"
+          : "매수 우위: 피보 진입구간(하단~상단) 도달 대기";
     } else if (passSignalAgg && !passSignalBase) {
       if (stepFinalStatusEl) setStepStatus(stepFinalStatusEl, false);
       decisionFinalEl.textContent = "공격모드 기준점수(58) 통과, 기본모드 기준점수(70)는 대기";

@@ -1159,6 +1159,7 @@ button:hover {
   line-height: 1.45;
   color: rgba(241, 246, 255, 0.9);
   white-space: pre-line;
+  overflow-wrap: anywhere;
 }
 
 .decision-final-box {
@@ -1779,7 +1780,19 @@ label.chk input[type="checkbox"] {
 
   .decision-step,
   .decision-final-box {
-    grid-template-columns: var(--decision-k-col, 124px) var(--decision-s-col, 76px) minmax(0, 1fr) !important;
+    grid-template-columns: minmax(0, 1fr) auto !important;
+    gap: 6px 8px;
+    align-items: start;
+  }
+
+  .decision-step-s {
+    justify-self: end;
+    width: 68px;
+  }
+
+  .decision-step-v,
+  .decision-final-v {
+    grid-column: 1 / -1;
   }
 
   .passcheck-metrics {
