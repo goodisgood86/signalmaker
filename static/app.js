@@ -2060,8 +2060,9 @@ function renderActionSummary(analysis, fibPlan) {
   let reversalReady = false;
   let reversalOverride = false;
   const lowVolumeBlock = String(latestVolumeStates?.["5m"] || latestVolumeStates?.single || "").includes("평균 이하");
-  const scoreThresholdBase = 55;
-  const scoreThresholdAggressive = 48;
+  const scoreThresholdBase = 52;
+  const scoreThresholdAggressive = 45;
+  const minEntryRr = 0.7;
 
   if (fibPlan && Number.isFinite(close)) {
     const buyP = Number(fibPlan.buyPrice);
@@ -2278,7 +2279,9 @@ function renderActionSummary(analysis, fibPlan) {
       "규칙: 공격모드는 기준점수만 완화, 안전필터(담보/일손실/손절무효)는 동일 적용",
     ];
     if (!passSignal) lines.push("미통과: 신호 점수 부족");
-    if (passSignalAgg && !passSignalBase) lines.push("참고: 공격모드 기준점수(48)에서만 통과");
+    if (passSignalAgg && !passSignalBase) {
+      lines.push(`참고: 공격모드 기준점수(${scoreThresholdAggressive})에서만 통과`);
+    }
     if (swingConflict && !reversalOverride) lines.push("주의: 스윙 역방향 진입(점수 페널티 반영)");
     if (reversalReady) lines.push("하락 스윙 예외 충족: 바닥(0.0~0.236) 터치 후 종가 회복 + 롱우위 + 신뢰도");
     stepProbDetailEl.textContent = lines.join("\n");
@@ -2311,7 +2314,7 @@ function renderActionSummary(analysis, fibPlan) {
     (sideForPlan === "SELL"
       ? targetMid < entryMid * (1 - minTpPass) && stopPx > entryMid * (1 + minStopPass)
       : targetMid > entryMid * (1 + minTpPass) && stopPx < entryMid * (1 - minStopPass)) &&
-      (!Number.isFinite(rr) || rr >= 0.9);
+      (!Number.isFinite(rr) || rr >= minEntryRr);
   const passExecBase = passSignalBase && passRegime && passFib && passPlan && reactionPass && !lowVolumeBlock;
   const passExecAgg = passSignalAgg && passRegime && passFib && passPlan && reactionPass && !lowVolumeBlock;
   const passExec = passExecBase || passExecAgg;
@@ -2378,7 +2381,7 @@ function renderActionSummary(analysis, fibPlan) {
           : "롱 우위: 피보 진입구간(하단~상단) 도달 대기";
     } else if (passSignalAgg && !passSignalBase) {
       if (stepFinalStatusEl) setStepStatus(stepFinalStatusEl, false);
-      decisionFinalEl.textContent = "공격모드 기준점수(48) 통과, 기본모드 기준점수(55)는 대기";
+      decisionFinalEl.textContent = `공격모드 기준점수(${scoreThresholdAggressive}) 통과, 기본모드 기준점수(${scoreThresholdBase})는 대기`;
     } else if (side === "SELL") {
       if (stepFinalStatusEl) setStepStatus(stepFinalStatusEl, false);
       decisionFinalEl.textContent = "숏 우세: 진입 조건 재확인 후 대기";
