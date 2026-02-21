@@ -286,6 +286,10 @@ _AUTO_SPOT_PRICE_CACHE_TTL_S = max(
     5.0, float(str(os.getenv("AUTO_SPOT_PRICE_CACHE_TTL_S", "20")) or "20")
 )
 _AUTO_SPOT_PRICE_CACHE: Dict[str, Any] = {"ts": 0.0, "map": {}}
+_AUTO_TRADE_RULES_CACHE_TTL_S = max(
+    60.0, float(str(os.getenv("AUTO_TRADE_RULES_CACHE_TTL_S", "900")) or "900")
+)
+_AUTO_TRADE_RULES_CACHE: Dict[str, Dict[str, Any]] = {}
 _AUTO_ENTRY_CHASE_MAX_PCT = max(
     0.0,
     min(0.05, float(str(os.getenv("AUTO_ENTRY_CHASE_MAX_PCT", "0.012")) or "0.012")),
@@ -4509,6 +4513,25 @@ async def _auto_fetch_symbol_trade_rules(*, market: str, symbol: str) -> Dict[st
     }
 
 
+async def _auto_get_symbol_trade_rules_cached(*, market: str, symbol: str) -> Dict[str, float]:
+    m = str(market or "").lower().strip()
+    sym = str(symbol or "").upper().strip()
+    key = f"{m}:{sym}"
+    now_ts = time()
+    cached = _AUTO_TRADE_RULES_CACHE.get(key)
+    if isinstance(cached, dict):
+        ts = float(cached.get("ts", 0.0) or 0.0)
+        rules = cached.get("rules")
+        if isinstance(rules, dict) and (now_ts - ts) <= _AUTO_TRADE_RULES_CACHE_TTL_S:
+            return dict(rules)
+    rules = await _auto_fetch_symbol_trade_rules(market=m, symbol=sym)
+    _AUTO_TRADE_RULES_CACHE[key] = {"ts": now_ts, "rules": dict(rules)}
+    if len(_AUTO_TRADE_RULES_CACHE) > 256:
+        for k in list(_AUTO_TRADE_RULES_CACHE.keys())[:64]:
+            _AUTO_TRADE_RULES_CACHE.pop(k, None)
+    return dict(rules)
+
+
 async def _auto_set_futures_leverage(
     *,
     symbol: str,
@@ -4699,7 +4722,7 @@ async def _auto_place_market_order(
         raise HTTPException(status_code=400, detail="invalid market")
     if s not in {"BUY", "SELL"}:
         raise HTTPException(status_code=400, detail="invalid order side")
-    rules = await _auto_fetch_symbol_trade_rules(market=m, symbol=sym)
+    rules = await _auto_get_symbol_trade_rules_cached(market=m, symbol=sym)
     step_size = float(rules.get("step_size", 0.0) or 0.0)
     min_qty = float(rules.get("min_qty", 0.0) or 0.0)
     min_notional = float(rules.get("min_notional", 0.0) or 0.0)
@@ -5752,6 +5775,8 @@ async def _auto_eval_entry_candidate(
     market: str,
     interval: str,
     mode: str,
+    order_size_usdt: float,
+    futures_leverage: int,
     now_ts: float,
 ) -> Dict[str, Any]:
     symbol_u = str(symbol or "").upper().strip()
@@ -6061,6 +6086,44 @@ async def _auto_eval_entry_candidate(
             "signal": signal_info,
             "plan": plan_out,
         }
+
+    qty_basis_price = float(price_now if price_now > 0 else entry_price)
+    leverage_for_qty = float(max(1, int(futures_leverage or 1)) if market_u == "futures" else 1.0)
+    qty_raw = (float(order_size_usdt or 0.0) * leverage_for_qty) / max(1e-12, qty_basis_price)
+    try:
+        rules = await _auto_get_symbol_trade_rules_cached(market=market_u, symbol=symbol_u)
+    except HTTPException:
+        rules = {}
+    step_size = float(rules.get("step_size", 0.0) or 0.0)
+    min_qty = float(rules.get("min_qty", 0.0) or 0.0)
+    min_notional = float(rules.get("min_notional", 0.0) or 0.0)
+    qty_norm = _auto_decimal_floor_step(qty_raw, step_size if step_size > 0 else 1e-8)
+    if qty_norm <= 0 or qty_norm + 1e-12 < min_qty:
+        return {
+            "ok": False,
+            "action": "NO_SIGNAL",
+            "reason": "QTY_BELOW_MIN",
+            "symbol": symbol_u,
+            "signal": signal_info,
+            "plan": plan_out,
+            "qty_raw": round(float(qty_raw), 8),
+            "qty_norm": round(float(qty_norm), 8),
+            "min_qty": round(float(min_qty), 8),
+            "step_size": round(float(step_size), 8),
+        }
+    notional = float(qty_norm * max(0.0, qty_basis_price))
+    if min_notional > 0 and notional + 1e-8 < min_notional:
+        return {
+            "ok": False,
+            "action": "NO_SIGNAL",
+            "reason": "NOTIONAL_TOO_LOW",
+            "symbol": symbol_u,
+            "signal": signal_info,
+            "plan": plan_out,
+            "notional_usdt": round(float(notional), 8),
+            "min_notional": round(float(min_notional), 8),
+        }
+
     rank_score = float(score_pack.get("total", 0.0) or 0.0) + abs(float(decision.get("diff", 0.0) or 0.0)) * 0.12 + confidence * 8.0
     if str(regime.regime).upper() == "RANGE":
         rank_score += 1.2
@@ -6221,6 +6284,8 @@ async def _auto_trade_tick_core(
                     market=market,
                     interval=interval,
                     mode=mode,
+                    order_size_usdt=order_size_usdt,
+                    futures_leverage=futures_leverage,
                     now_ts=now_ts,
                 )
             except Exception as e:
@@ -6251,6 +6316,9 @@ async def _auto_trade_tick_core(
                         out["rr"] = evaluated.get("rr")
                     if "min_rr" in evaluated:
                         out["min_rr"] = evaluated.get("min_rr")
+                    for k in ("qty_raw", "qty_norm", "min_qty", "step_size", "notional_usdt", "min_notional"):
+                        if k in evaluated:
+                            out[k] = evaluated.get(k)
                     return out
                 continue
             scan_notes.append(

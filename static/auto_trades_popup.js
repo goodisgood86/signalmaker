@@ -183,6 +183,18 @@ function setTickStatusFromResponse(data) {
     const minRrVal = Number(data?.min_rr);
     const rrText =
       Number.isFinite(rrVal) && Number.isFinite(minRrVal) ? `RR ${rrVal.toFixed(2)} < 최소 ${minRrVal.toFixed(2)}` : "";
+    const qtyNormVal = Number(data?.qty_norm);
+    const minQtyVal = Number(data?.min_qty);
+    const qtyText =
+      reason === "QTY_BELOW_MIN" && Number.isFinite(qtyNormVal) && Number.isFinite(minQtyVal)
+        ? `수량 ${qtyNormVal.toFixed(8)} < 최소 ${minQtyVal.toFixed(8)}`
+        : "";
+    const notionalVal = Number(data?.notional_usdt);
+    const minNotionalVal = Number(data?.min_notional);
+    const notionalText =
+      reason === "NOTIONAL_TOO_LOW" && Number.isFinite(notionalVal) && Number.isFinite(minNotionalVal)
+        ? `주문금액 ${notionalVal.toFixed(4)} < 최소 ${minNotionalVal.toFixed(4)} USDT`
+        : "";
     const base =
       reason === "SIGNAL_SCORE_LOW"
         ? "자동매매 대기: 신호 점수 미달"
@@ -202,11 +214,16 @@ function setTickStatusFromResponse(data) {
             ? "자동매매 대기: 추격 진입 제한"
             : reason === "RR_TOO_LOW"
               ? "자동매매 대기: 기대 RR 부족"
+              : reason === "QTY_BELOW_MIN"
+                ? "자동매매 대기: 최소 주문수량 미달"
+                : reason === "NOTIONAL_TOO_LOW"
+                  ? "자동매매 대기: 최소 주문금액 미달"
         : reason === "PLAN_INVALIDATED"
           ? "자동매매 대기: 기존 피보 시나리오 무효 (재계산 대기)"
           : "자동매매 대기: 진입 신호 없음";
     const full = append(base);
-    setCfgStatus(rrText ? `${full} | ${rrText}` : full);
+    const extras = [rrText, qtyText, notionalText].filter(Boolean).join(" | ");
+    setCfgStatus(extras ? `${full} | ${extras}` : full);
     return;
   }
   if (action === "WAIT_FIB_ENTRY") {
