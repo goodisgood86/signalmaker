@@ -353,6 +353,16 @@ def _auth_enabled() -> bool:
     return bool(_auth_expected_hash())
 
 
+def _cookie_domain_for_request(request: Request) -> str | None:
+    forced = str(os.getenv("APP_COOKIE_DOMAIN", "")).strip()
+    if forced:
+        return forced
+    host = str(getattr(request.url, "hostname", "") or "").lower().strip()
+    if host.endswith("signalmaker.pro"):
+        return ".signalmaker.pro"
+    return None
+
+
 def _auth_cleanup_sessions(now_ms: int) -> None:
     stale = []
     for sid, sess in _AUTH_SESSIONS.items():
@@ -1845,6 +1855,7 @@ def api_auth_unlock(
             "expires_ms": exp_ms,
         }
     )
+    cookie_domain = _cookie_domain_for_request(request)
     resp.set_cookie(
         key=_AUTH_COOKIE_NAME,
         value=sid,
@@ -1853,6 +1864,7 @@ def api_auth_unlock(
         samesite="lax",
         secure=bool(request.url.scheme == "https"),
         path="/",
+        domain=cookie_domain,
     )
     return resp
 
@@ -1865,7 +1877,7 @@ def api_auth_logout(
     if sid:
         _AUTH_SESSIONS.pop(str(sid), None)
     resp = JSONResponse({"ok": True})
-    resp.delete_cookie(key=_AUTH_COOKIE_NAME, path="/")
+    resp.delete_cookie(key=_AUTH_COOKIE_NAME, path="/", domain=_cookie_domain_for_request(request))
     return resp
 
 
@@ -1908,6 +1920,7 @@ def api_auto_trade_config_lock_unlock(
             "expires_ms": exp_ms,
         }
     )
+    cookie_domain = _cookie_domain_for_request(request)
     resp.set_cookie(
         key=_CFG_UNLOCK_COOKIE_NAME,
         value=sid,
@@ -1916,6 +1929,7 @@ def api_auto_trade_config_lock_unlock(
         samesite="lax",
         secure=bool(request.url.scheme == "https"),
         path="/",
+        domain=cookie_domain,
     )
     return resp
 
@@ -1928,7 +1942,7 @@ def api_auto_trade_config_lock_lock(
     if sid:
         _CFG_UNLOCK_SESSIONS.pop(str(sid), None)
     resp = JSONResponse({"ok": True, "enabled": _cfg_unlock_enabled(), "unlocked": False})
-    resp.delete_cookie(key=_CFG_UNLOCK_COOKIE_NAME, path="/")
+    resp.delete_cookie(key=_CFG_UNLOCK_COOKIE_NAME, path="/", domain=_cookie_domain_for_request(request))
     return resp
 
 
