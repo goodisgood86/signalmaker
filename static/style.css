@@ -1239,13 +1239,14 @@ button:hover {
 }
 
 .passcheck-head-right {
-  display: inline-flex;
-  align-items: center;
+  display: flex;
+  align-items: flex-start;
   justify-content: flex-end;
   gap: 8px;
   flex: 1 1 auto;
   min-width: 0;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
+  max-width: 100%;
 }
 
 .passcheck-period-wrap {
@@ -1256,6 +1257,7 @@ button:hover {
   color: rgba(241, 246, 255, 0.9);
   white-space: nowrap;
   flex-shrink: 0;
+  margin-left: auto;
 }
 
 .passcheck-period-wrap > span {
@@ -1283,11 +1285,14 @@ button:hover {
 .passcheck-note {
   font-size: 11px;
   color: rgba(241, 246, 255, 0.82);
-  flex: 1 1 auto;
+  flex: 1 1 240px;
   min-width: 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  word-break: keep-all;
 }
 
 .passcheck-metrics {
