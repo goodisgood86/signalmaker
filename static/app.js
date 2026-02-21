@@ -774,11 +774,9 @@ function setAutoTickStatus(data) {
   }
   if (action === "NO_SIGNAL") {
     const base =
-      reason === "SPOT_SELL_BLOCKED"
-        ? "자동매매 대기: 숏 우세지만 스팟 숏 금지"
-        : reason === "BASIC_PASS_FAIL"
-          ? "자동매매 대기: 확률 미PASS"
-          : "자동매매 대기: 진입 신호 없음";
+      reason === "BASIC_PASS_FAIL"
+        ? "자동매매 대기: 확률 미PASS"
+        : "자동매매 대기: 진입 신호 없음";
     setAutoStatus(planText ? `${base} | ${planText}` : base);
     return;
   }
@@ -1943,8 +1941,6 @@ function renderActionSummary(analysis, fibPlan) {
   const mtfConflict = !mtfBias.aligned;
   if (mtfBias.aligned && mtfBias.side && sideSignal !== "WAIT" && sideSignal !== mtfBias.side) sideSignal = "WAIT";
   if (mtfConflict) sideSignal = "WAIT";
-  let spotSellBlocked = false;
-
   let side = sideSignal;
   // 스윙 충돌은 기본적으로 대기, 단 반전 바닥 롱 조건 충족 시 예외 허용한다.
   let swingConflict = false;
@@ -1957,12 +1953,8 @@ function renderActionSummary(analysis, fibPlan) {
   // 신뢰도가 극단적으로 낮으면 방향 차이가 커도 관망으로 처리한다.
   if (conf < params.confFloor) sideSignal = "WAIT";
   if (regime === "HIGH_VOL" && conf < params.passRegimeConf && Math.abs(diff) < params.passRegimeDiff) sideSignal = "WAIT";
-  if (selectedMarket === "spot" && sideSignal === "SELL") {
-    spotSellBlocked = true;
-    sideSignal = "WAIT";
-  }
   if (sideSignal === "WAIT") side = "WAIT";
-  let sideForPlan = spotSellBlocked ? "SELL" : side;
+  let sideForPlan = side;
   setTradeLabels(sideForPlan);
 
   if (side === "BUY") {
@@ -1987,22 +1979,18 @@ function renderActionSummary(analysis, fibPlan) {
         swingBias
       ).toFixed(1)}%p`;
     } else {
-      actionTitleEl.textContent = "지금은 비중축소/ 관망 구간입니다.";
-      actionSubtitleEl.textContent = "현재가를 확인하고 진입 기준가를 기다리세요.";
+      actionTitleEl.textContent = "지금은 숏 쪽이 유리합니다.";
+      actionSubtitleEl.textContent = "추세/모멘텀 합의가 숏 방향입니다. 변동성이 크면 분할 진입이 안전합니다.";
     }
   } else {
     actionBadgeEl.textContent = "관망";
     actionBadgeEl.className = "action-badge wait";
-    actionTitleEl.textContent = spotSellBlocked
-      ? "숏 우세지만 스팟 숏 금지로 자동매매는 대기입니다."
-      : mtfConflict
+    actionTitleEl.textContent = mtfConflict
       ? "상위 타임프레임 방향 충돌로 관망입니다."
       : swingConflict
         ? "확률 방향과 피보 스윙이 충돌해 관망입니다."
         : "지금은 관망이 유리합니다.";
-    actionSubtitleEl.textContent = spotSellBlocked
-      ? "현물에서는 신규 SELL 진입이 불가합니다. 비중축소/관망 관점으로 해석하세요."
-      : mtfConflict
+    actionSubtitleEl.textContent = mtfConflict
       ? "4h/1h 방향이 다릅니다. 상위 프레임이 정렬될 때까지 신규진입을 보류합니다."
       : swingConflict
         ? "확률은 한쪽 우위지만 피보 스윙이 반대입니다. 방향이 정렬될 때까지 대기하세요."
@@ -2023,7 +2011,6 @@ function renderActionSummary(analysis, fibPlan) {
     else whaleStateEl.textContent = whaleLabel || "중립";
   }
   let verdict = "그래서 관망이 유리합니다.";
-  if (spotSellBlocked) verdict = "그래서 숏 우세지만 스팟 숏 금지로 자동매매는 대기입니다.";
   if (side === "BUY") verdict = "그래서 롱 우세로 판단합니다.";
   if (side === "SELL") verdict = "그래서 숏 우세로 판단합니다.";
 
@@ -2210,7 +2197,7 @@ function renderActionSummary(analysis, fibPlan) {
       actionSubtitleEl.textContent = "0.0~0.236 터치 후 0.236 위 종가 회복 + 롱 우위 + 신뢰도 조건 충족";
     }
   }
-  sideForPlan = spotSellBlocked ? "SELL" : side;
+  sideForPlan = side;
   setTradeLabels(sideForPlan);
 
   entryZoneEl.textContent = entryTxt;
@@ -2251,14 +2238,10 @@ function renderActionSummary(analysis, fibPlan) {
   const passSignal = passSignalBase || passSignalAgg;
   setStepStatus(stepProbStatusEl, passSignal);
   if (stepProbDetailEl) {
-    const sideForDisplay = spotSellBlocked ? "SELL" : side;
+    const sideForDisplay = side;
     const sidePct = sideForDisplay === "SELL" ? sell : buy;
     const sideLabel = sideForDisplay === "SELL" ? "숏" : "롱";
-    if (spotSellBlocked) {
-      stepProbDetailEl.textContent = `확률: 롱 ${buy.toFixed(2)}% / 숏 ${sell.toFixed(2)}% | 신뢰도 ${(conf * 100).toFixed(
-        1
-      )}%\n상태: 숏 우세이나 스팟 숏 금지로 자동매매 대기`;
-    } else if (swingConflict && !reversalOverride) {
+    if (swingConflict && !reversalOverride) {
       stepProbDetailEl.textContent = `확률: 롱 ${buy.toFixed(2)}% / 숏 ${sell.toFixed(2)}% | 신뢰도 ${(conf * 100).toFixed(
         1
       )}%\n상태: 스윙 정방향 불일치(하락 스윙 예외 미충족)`;
@@ -2270,7 +2253,7 @@ function renderActionSummary(analysis, fibPlan) {
           1
         )} · 방향 ${signalScore.side.toFixed(1)} · 피보 ${signalScore.fib.toFixed(1)} · 모멘텀 ${signalScore.momentum.toFixed(1)} · 플로우 ${signalScore.flow.toFixed(1)}`,
         `고래/플로우: ${whaleLabel}${Number.isFinite(flowScore) ? ` (${flowScore >= 0 ? "+" : ""}${flowScore.toFixed(2)})` : ""} · 가중치 ${(flowWeight * 100).toFixed(0)}%`,
-        "규칙: 공격모드는 기준점수만 완화, 안전필터(담보/일손실/손절무효/스팟 숏금지)는 동일 적용",
+        "규칙: 공격모드는 기준점수만 완화, 안전필터(담보/일손실/손절무효)는 동일 적용",
       ];
       if (!passSignal) lines.push("미통과: 신호 점수 부족");
       if (passSignalAgg && !passSignalBase) lines.push("참고: 공격모드 기준점수(58)에서만 통과");
@@ -2353,10 +2336,7 @@ function renderActionSummary(analysis, fibPlan) {
     }
   }
   if (decisionFinalEl) {
-    if (spotSellBlocked) {
-      if (stepFinalStatusEl) setStepStatus(stepFinalStatusEl, false);
-      decisionFinalEl.textContent = "숏 우세지만 스팟 숏 금지로 자동매매는 진입 대기";
-    } else if (swingConflict && !reversalOverride) {
+    if (swingConflict && !reversalOverride) {
       if (stepFinalStatusEl) setStepStatus(stepFinalStatusEl, false);
       decisionFinalEl.textContent = "하락 스윙 예외 미충족으로 진입 보류";
     } else if (passExec && side === "BUY") {
@@ -2366,7 +2346,7 @@ function renderActionSummary(analysis, fibPlan) {
         : "피보 진입구간 터치 시 분할 진입 가능 구간";
     } else if (side === "SELL" && passSignal && passRegime) {
       if (stepFinalStatusEl) setStepStatus(stepFinalStatusEl, true);
-      decisionFinalEl.textContent = "현물 기준 비중축소/관망 우선";
+      decisionFinalEl.textContent = "숏 우세: 피보 진입구간 터치 시 분할 진입 가능 구간";
     } else if (passSignal && passRegime && !passFib) {
       if (stepFinalStatusEl) setStepStatus(stepFinalStatusEl, false);
       decisionFinalEl.textContent =
@@ -2378,7 +2358,7 @@ function renderActionSummary(analysis, fibPlan) {
       decisionFinalEl.textContent = "공격모드 기준점수(58) 통과, 기본모드 기준점수(70)는 대기";
     } else if (side === "SELL") {
       if (stepFinalStatusEl) setStepStatus(stepFinalStatusEl, false);
-      decisionFinalEl.textContent = "현물 기준 신규매수보다 비중축소/관망 우선";
+      decisionFinalEl.textContent = "숏 우세: 진입 조건 재확인 후 대기";
     } else {
       if (stepFinalStatusEl) setStepStatus(stepFinalStatusEl, false);
       decisionFinalEl.textContent = "관망 후 다음 시그널 확인";
@@ -2388,7 +2368,6 @@ function renderActionSummary(analysis, fibPlan) {
     if (reversalOverride) positionStateEl.textContent = "하락추세 반등 롱";
     else if (side === "BUY") positionStateEl.textContent = "롱";
     else if (side === "SELL") positionStateEl.textContent = "숏";
-    else if (spotSellBlocked) positionStateEl.textContent = "숏";
     else positionStateEl.textContent = "관망";
   }
   if (actionReadGuideEl) actionReadGuideEl.textContent = readGuide;
@@ -2422,9 +2401,7 @@ function renderActionSummary(analysis, fibPlan) {
   if (actionExplainEl) {
     const setupTxt = reversalOverride
       ? "반전 바닥 롱"
-      : spotSellBlocked
-        ? "숏 우세(스팟 숏 금지)"
-        : side === "BUY"
+      : side === "BUY"
           ? "추세/반등 롱"
           : side === "SELL"
             ? "숏 우세"

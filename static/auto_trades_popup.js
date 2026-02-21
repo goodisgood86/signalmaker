@@ -186,8 +186,6 @@ function setTickStatusFromResponse(data) {
     const base =
       reason === "SIGNAL_SCORE_LOW"
         ? "자동매매 대기: 신호 점수 미달"
-        : reason === "SPOT_SELL_BLOCKED"
-          ? "자동매매 대기: 숏 우세지만 스팟 숏 금지"
         : reason === "SIGNAL_SIDE_WAIT"
           ? "자동매매 대기: 방향 우위 미확정"
           : reason === "REVERSAL_NOT_READY"

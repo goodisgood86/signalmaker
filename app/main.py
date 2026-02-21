@@ -1458,7 +1458,6 @@ def _calc_pass_check_from_df(
             market=market,
             mode="balanced",
             swing_is_up=is_up,
-            allow_spot_sell=(market == "spot"),
         )
         decision_side = str(decision.get("side", "WAIT")).upper()
 
@@ -2214,7 +2213,6 @@ def _auto_decide_signal(
     market: str,
     mode: str,
     swing_is_up: Optional[bool],
-    allow_spot_sell: bool = False,
 ) -> Dict[str, Any]:
     params = _auto_apply_mode_relax(_decision_params_by_regime(regime, symbol), mode)
     raw_diff = float(buy_pct) - float(sell_pct)
@@ -2233,8 +2231,6 @@ def _auto_decide_signal(
     if confidence < params["conf_floor"]:
         side = "WAIT"
     if str(regime).upper() == "HIGH_VOL" and confidence < params["pass_regime_conf"] and abs(diff) < params["pass_regime_diff"]:
-        side = "WAIT"
-    if market == "spot" and side == "SELL" and (not bool(allow_spot_sell)):
         side = "WAIT"
     if swing_is_up is True and side == "SELL":
         side = "WAIT"
@@ -5713,12 +5709,8 @@ async def _auto_eval_entry_candidate(
             s = str(c or "").upper()
             if s not in {"BUY", "SELL"}:
                 continue
-            if market_u == "spot" and s == "SELL":
-                continue
             return s
         fallback = "BUY" if float(buy_pct) >= float(sell_pct) else "SELL"
-        if market_u == "spot" and fallback == "SELL":
-            fallback = "BUY"
         return fallback
 
     last_high = float(df["high"].iloc[-1])
@@ -5770,9 +5762,6 @@ async def _auto_eval_entry_candidate(
     decision_side = str(decision.get("side", "WAIT")).upper()
     if mode_v == "aggressive" and decision_side == "WAIT":
         decision_side = _auto_pick_aggressive_side(buy_pct=buy_pct, sell_pct=sell_pct, market=market_u)
-    spot_sell_blocked = market_u == "spot" and decision_side == "SELL"
-    if spot_sell_blocked:
-        decision_side = "WAIT"
     score_side = decision_side
     if reversal_ready and score_side == "WAIT":
         score_side = "BUY"
@@ -5833,7 +5822,7 @@ async def _auto_eval_entry_candidate(
         out = {
             "ok": False,
             "action": "NO_SIGNAL",
-            "reason": "SPOT_SELL_BLOCKED" if spot_sell_blocked else "SIGNAL_SIDE_WAIT",
+            "reason": "SIGNAL_SIDE_WAIT",
             "symbol": symbol_u,
             "signal": signal_info,
         }
@@ -7334,6 +7323,10 @@ async def api_pass_check_db(
     except HTTPException:
         summary = None
     try:
+        progress_row = await _pc_get_progress(symbol_u, market_u, interval_u, period)
+    except HTTPException:
+        progress_row = None
+    try:
         baseline = await _pc_get_entry_baseline_counts(symbol_u, market_u, interval_u)
     except HTTPException:
         baseline = None
@@ -7358,6 +7351,12 @@ async def api_pass_check_db(
                 except HTTPException:
                     first_signal_time_ms = 0
             latest_signal_time_ms = int(summary.get("latest_signal_time_ms", 0) or 0)
+        if latest_signal_time_ms <= 0 and isinstance(progress_row, dict):
+            latest_signal_time_ms = int(progress_row.get("last_signal_time_ms", 0) or 0)
+        # 무신호 구간에서도 검증 범위를 표기할 수 있도록 최초값을 period 기준으로 보정한다.
+        if first_signal_time_ms <= 0 and latest_signal_time_ms > 0:
+            period_days = 1 if period == "24h" else 7 if period == "7d" else 3
+            first_signal_time_ms = max(0, latest_signal_time_ms - (period_days * 24 * 60 * 60 * 1000))
         return _build_pass_check_payload(
             symbol=symbol_u,
             market=market_u,

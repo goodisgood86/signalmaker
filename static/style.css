@@ -1241,7 +1241,9 @@ button:hover {
 .passcheck-head-right {
   display: inline-flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 8px;
+  flex: 1 1 auto;
   min-width: 0;
   flex-wrap: nowrap;
 }
@@ -1281,6 +1283,8 @@ button:hover {
 .passcheck-note {
   font-size: 11px;
   color: rgba(241, 246, 255, 0.82);
+  flex: 1 1 auto;
+  min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1840,6 +1844,25 @@ label.chk input[type="checkbox"] {
 
   .passcheck-metrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .passcheck-head-right {
+    width: 100%;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .passcheck-note {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+    line-height: 1.35;
+  }
+
+  .passcheck-period-wrap {
+    justify-self: end;
   }
 
   .sim-prices {
