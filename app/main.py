@@ -4282,6 +4282,75 @@ def _auto_is_unknown_order_error(detail: str) -> bool:
     return "unknown order" in d or "order does not exist" in d or "-2011" in d
 
 
+def _auto_is_algo_endpoint_required_error(detail: str) -> bool:
+    d = str(detail or "").lower()
+    return "-4120" in d or "algo order api" in d or "order type not supported for this endpoint" in d
+
+
+def _auto_normalize_futures_algo_order(row: Dict[str, Any]) -> Dict[str, Any]:
+    algo_id = str(row.get("algoId", row.get("orderId", "")) or "")
+    client_algo_id = str(row.get("clientAlgoId", row.get("clientOrderId", "")) or "")
+    status = str(row.get("status", "") or "").upper() or "NEW"
+    qty = str(row.get("executedQty", row.get("cumQty", row.get("quantity", row.get("origQty", "0")))) or "0")
+    return {
+        "orderId": algo_id,
+        "clientOrderId": client_algo_id,
+        "status": status,
+        "type": str(row.get("type", row.get("origType", "")) or ""),
+        "origType": str(row.get("origType", row.get("type", "")) or ""),
+        "executedQty": qty,
+        "origQty": str(row.get("quantity", row.get("origQty", "0")) or "0"),
+        "avgPrice": str(row.get("avgPrice", "0") or "0"),
+        "price": str(row.get("price", "0") or "0"),
+        "cummulativeQuoteQty": str(row.get("cumQuote", row.get("cummulativeQuoteQty", "0")) or "0"),
+        "stopPrice": str(row.get("stopPrice", "0") or "0"),
+        "_algo": True,
+        "_algoId": algo_id,
+        "_clientAlgoId": client_algo_id,
+    }
+
+
+async def _auto_fetch_futures_algo_order_by_client_id(
+    *,
+    symbol: str,
+    client_order_id: str,
+    api_key: str,
+    api_secret: str,
+) -> Dict[str, Any]:
+    sym = str(symbol or "").upper().strip()
+    cid = str(client_order_id or "").strip()
+    if not sym or not cid:
+        raise HTTPException(status_code=400, detail="symbol/client_order_id is required")
+
+    async def _query(path: str, extra: Dict[str, Any] | None = None) -> List[Dict[str, Any]]:
+        params: Dict[str, Any] = {"symbol": sym}
+        if isinstance(extra, dict):
+            params.update(extra)
+        body = await _auto_binance_signed_call(
+            base_url=BINANCE_FUTURES_BASE_URL,
+            path=path,
+            api_key=api_key,
+            api_secret=api_secret,
+            method="GET",
+            extra_params=params,
+        )
+        if isinstance(body, list):
+            return [dict(x) for x in body if isinstance(x, dict)]
+        return []
+
+    open_rows = await _query("/fapi/v1/openAlgoOrders")
+    for row in open_rows:
+        if str(row.get("clientAlgoId", row.get("clientOrderId", "")) or "") == cid:
+            return _auto_normalize_futures_algo_order(row)
+
+    hist_rows = await _query("/fapi/v1/historicalAlgoOrders", {"limit": 100})
+    for row in hist_rows:
+        if str(row.get("clientAlgoId", row.get("clientOrderId", "")) or "") == cid:
+            return _auto_normalize_futures_algo_order(row)
+
+    raise HTTPException(status_code=400, detail="binance api 실패: -2011: Unknown order sent.")
+
+
 async def _auto_binance_public_get(*, market: str, path: str, params: Dict[str, Any] | None = None) -> Any:
     base_url = BINANCE_FUTURES_BASE_URL if str(market).lower() == "futures" else BINANCE_SPOT_BASE_URL
     try:
@@ -4642,8 +4711,27 @@ async def _auto_fetch_order_by_client_id(
     if not cid:
         raise HTTPException(status_code=400, detail="client_order_id is required")
     if m == "futures":
-        base_url = BINANCE_FUTURES_BASE_URL
-        path = "/fapi/v1/order"
+        try:
+            body = await _auto_binance_signed_call(
+                base_url=BINANCE_FUTURES_BASE_URL,
+                path="/fapi/v1/order",
+                api_key=api_key,
+                api_secret=api_secret,
+                method="GET",
+                extra_params={"symbol": sym, "origClientOrderId": cid},
+            )
+            if isinstance(body, dict):
+                return body
+        except HTTPException as e:
+            detail = str(getattr(e, "detail", "") or "")
+            if not _auto_is_unknown_order_error(detail) and not _auto_is_algo_endpoint_required_error(detail):
+                raise
+        return await _auto_fetch_futures_algo_order_by_client_id(
+            symbol=sym,
+            client_order_id=cid,
+            api_key=api_key,
+            api_secret=api_secret,
+        )
     else:
         base_url = BINANCE_SPOT_BASE_URL
         path = "/api/v3/order"
@@ -4676,31 +4764,79 @@ async def _auto_cancel_order(
     if not oid and not cid:
         return
     if m == "futures":
-        base_url = BINANCE_FUTURES_BASE_URL
-        path = "/fapi/v1/order"
-    else:
-        base_url = BINANCE_SPOT_BASE_URL
-        path = "/api/v3/order"
-    params: Dict[str, Any] = {"symbol": sym}
-    if oid:
-        params["orderId"] = oid
-    else:
-        params["origClientOrderId"] = cid
-    try:
-        await _auto_binance_signed_call(
-            base_url=base_url,
-            path=path,
-            api_key=api_key,
-            api_secret=api_secret,
-            method="DELETE",
-            extra_params=params,
-        )
-    except HTTPException as e:
-        # 이미 체결/취소된 주문은 취소 실패를 무시한다.
-        msg = str(getattr(e, "detail", "") or "").lower()
-        if "unknown order" in msg or "-2011" in msg:
+        params: Dict[str, Any] = {"symbol": sym}
+        if oid:
+            params["orderId"] = oid
+        else:
+            params["origClientOrderId"] = cid
+        try:
+            await _auto_binance_signed_call(
+                base_url=BINANCE_FUTURES_BASE_URL,
+                path="/fapi/v1/order",
+                api_key=api_key,
+                api_secret=api_secret,
+                method="DELETE",
+                extra_params=params,
+            )
             return
-        raise
+        except HTTPException as e:
+            detail = str(getattr(e, "detail", "") or "")
+            if not _auto_is_unknown_order_error(detail) and not _auto_is_algo_endpoint_required_error(detail):
+                raise
+            algo_params: Dict[str, Any] = {"symbol": sym}
+            if oid:
+                algo_params["algoId"] = oid
+            if cid:
+                algo_params["clientAlgoId"] = cid
+            if "algoId" not in algo_params and cid:
+                try:
+                    algo_order = await _auto_fetch_futures_algo_order_by_client_id(
+                        symbol=sym,
+                        client_order_id=cid,
+                        api_key=api_key,
+                        api_secret=api_secret,
+                    )
+                    algo_id = str(algo_order.get("_algoId", "") or algo_order.get("orderId", "") or "")
+                    if algo_id:
+                        algo_params["algoId"] = algo_id
+                except HTTPException:
+                    pass
+            try:
+                await _auto_binance_signed_call(
+                    base_url=BINANCE_FUTURES_BASE_URL,
+                    path="/fapi/v1/algoOrder",
+                    api_key=api_key,
+                    api_secret=api_secret,
+                    method="DELETE",
+                    extra_params=algo_params,
+                )
+                return
+            except HTTPException as e2:
+                msg2 = str(getattr(e2, "detail", "") or "").lower()
+                if "unknown order" in msg2 or "-2011" in msg2 or "unknown algoorder" in msg2:
+                    return
+                raise
+    else:
+        params = {"symbol": sym}
+        if oid:
+            params["orderId"] = oid
+        else:
+            params["origClientOrderId"] = cid
+        try:
+            await _auto_binance_signed_call(
+                base_url=BINANCE_SPOT_BASE_URL,
+                path="/api/v3/order",
+                api_key=api_key,
+                api_secret=api_secret,
+                method="DELETE",
+                extra_params=params,
+            )
+        except HTTPException as e:
+            # 이미 체결/취소된 주문은 취소 실패를 무시한다.
+            msg = str(getattr(e, "detail", "") or "").lower()
+            if "unknown order" in msg or "-2011" in msg:
+                return
+            raise
 
 
 async def _auto_place_market_order(
@@ -4822,29 +4958,30 @@ async def _auto_place_protective_stop_order(
     stop_str = _auto_decimal_to_str(stop_norm, tick_size)
     cid = str(client_order_id or "").strip()
     if m == "futures":
+        algo_params: Dict[str, Any] = {
+            "symbol": sym,
+            "side": s,
+            "type": "STOP_MARKET",
+            "reduceOnly": "true",
+            "quantity": qty_str,
+            "stopPrice": stop_str,
+            "workingType": "MARK_PRICE",
+        }
+        if cid:
+            algo_params["newClientAlgoOrderId"] = cid
         try:
             body = await _auto_binance_signed_call(
                 base_url=BINANCE_FUTURES_BASE_URL,
-                path="/fapi/v1/order",
+                path="/fapi/v1/algoOrder",
                 api_key=api_key,
                 api_secret=api_secret,
                 method="POST",
-                extra_params={
-                    "symbol": sym,
-                    "side": s,
-                    "type": "STOP_MARKET",
-                    "reduceOnly": "true",
-                    "quantity": qty_str,
-                    "stopPrice": stop_str,
-                    "workingType": "MARK_PRICE",
-                    "newClientOrderId": cid,
-                },
+                extra_params=algo_params,
             )
         except HTTPException as e:
             detail = str(getattr(e, "detail", "") or "")
             if cid and _auto_is_duplicate_order_error(detail):
-                body = await _auto_fetch_order_by_client_id(
-                    market=m,
+                body = await _auto_fetch_futures_algo_order_by_client_id(
                     symbol=sym,
                     client_order_id=cid,
                     api_key=api_key,
@@ -4854,15 +4991,26 @@ async def _auto_place_protective_stop_order(
                 raise
         if not isinstance(body, dict):
             raise HTTPException(status_code=502, detail="protective stop response invalid")
+        ret_cid = str(body.get("clientAlgoId", body.get("clientOrderId", cid)) or cid)
         return {
-            "order_id": str(body.get("orderId", "") or ""),
-            "client_order_id": cid,
-            "type": "STOP_MARKET",
+            "order_id": str(body.get("algoId", body.get("orderId", "")) or ""),
+            "client_order_id": ret_cid,
+            "type": "STOP_MARKET_ALGO",
             "stop_price": round(stop_norm, 8),
             "qty": round(qty_norm, 8),
         }
 
     # spot: STOP_LOSS(시장가) 보호주문 우선 사용
+    spot_params: Dict[str, Any] = {
+        "symbol": sym,
+        "side": s,
+        "type": "STOP_LOSS",
+        "quantity": qty_str,
+        "stopPrice": stop_str,
+        "newOrderRespType": "RESULT",
+    }
+    if cid:
+        spot_params["newClientOrderId"] = cid
     try:
         body = await _auto_binance_signed_call(
             base_url=BINANCE_SPOT_BASE_URL,
@@ -4870,15 +5018,7 @@ async def _auto_place_protective_stop_order(
             api_key=api_key,
             api_secret=api_secret,
             method="POST",
-            extra_params={
-                "symbol": sym,
-                "side": s,
-                "type": "STOP_LOSS",
-                "quantity": qty_str,
-                "stopPrice": stop_str,
-                "newOrderRespType": "RESULT",
-                "newClientOrderId": cid,
-            },
+            extra_params=spot_params,
         )
     except HTTPException as e:
         detail = str(getattr(e, "detail", "") or "")
