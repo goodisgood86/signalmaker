@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>SignalMaker</title>
-    <link rel="stylesheet" href="/static/style.css?v=20260221a" />
+    <link rel="stylesheet" href="/static/style.css?v=20260221c" />
     <script src="https://unpkg.com/lightweight-charts@4.2.1/dist/lightweight-charts.standalone.production.js"></script>
   </head>
   <body>
@@ -129,6 +129,14 @@
               <div class="prob-item">
                 <div class="prob-label">레짐 <span class="tip" tabindex="0" data-tip="1) 시장 상태 구분&#10;2) TREND=추세&#10;3) RANGE=횡보&#10;4) HIGH_VOL=고변동">?</span></div>
                 <div class="prob-value" id="regime">-</div>
+              </div>
+              <div class="prob-item">
+                <div class="prob-label">포지션 시그널</div>
+                <div class="prob-value" id="positionState">-</div>
+              </div>
+              <div class="prob-item">
+                <div class="prob-label">고래 심리</div>
+                <div class="prob-value" id="whaleState">-</div>
               </div>
               <div class="prob-item">
                 <div class="prob-label">거래량 상태 <span class="tip" tabindex="0" data-tip="1) 분석 타임프레임 기준 거래량&#10;2) 직전 마감봉 거래량을 최근 20봉 평균과 비교&#10;3) 1.15x 이상: 평균 이상&#10;4) 0.85x 미만: 평균 이하&#10;5) 그 사이: 평균수준">?</span></div>
@@ -312,6 +320,6 @@
       </footer>
     </div>
 
-    <script src="/static/app.js?v=20260221a"></script>
+    <script src="/static/app.js?v=20260221c"></script>
   </body>
 </html>

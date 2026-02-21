@@ -890,7 +890,7 @@ button:hover {
 
 .prob {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(128px, 1fr));
   gap: 9px;
 }
 
@@ -919,6 +919,14 @@ button:hover {
 #volumeState {
   font-size: 16px;
   line-height: 1.25;
+  letter-spacing: -0.01em;
+  white-space: pre-line;
+}
+
+#positionState,
+#whaleState {
+  font-size: 16px;
+  line-height: 1.2;
   letter-spacing: -0.01em;
   white-space: pre-line;
 }
@@ -1573,6 +1581,23 @@ label.chk input[type="checkbox"] {
   .head-actions {
     justify-content: flex-start;
     flex-wrap: nowrap;
+  }
+
+  .decision-step,
+  .decision-final-box {
+    grid-template-columns: minmax(0, 1fr) auto !important;
+    gap: 6px 8px;
+    align-items: start;
+  }
+
+  .decision-step-s {
+    justify-self: end;
+    width: 68px;
+  }
+
+  .decision-step-v,
+  .decision-final-v {
+    grid-column: 1 / -1;
   }
 
   .entry-row,

@@ -4,9 +4,10 @@ create table if not exists public.auto_trade_settings (
   user_id bigint not null references public.sim_users(id) on delete cascade,
   enabled boolean not null default false,
   mode text not null default 'balanced',
-  symbol text not null default 'BTCUSDT',
+  symbol text not null default 'ALL',
   market text not null default 'spot',
   interval text not null default '5m',
+  futures_leverage integer not null default 3,
   order_size_usdt double precision not null default 120,
   take_profit_pct double precision not null default 1.8,
   stop_loss_pct double precision not null default 1.0,
@@ -20,6 +21,13 @@ create table if not exists public.auto_trade_settings (
 );
 
 create index if not exists idx_auto_trade_settings_user on public.auto_trade_settings(user_id);
+
+-- Existing table migration helpers
+alter table public.auto_trade_settings
+  add column if not exists futures_leverage integer not null default 3;
+
+alter table public.auto_trade_settings
+  alter column symbol set default 'ALL';
 
 -- Binance API link (1 row per user)
 create table if not exists public.auto_trade_binance_links (

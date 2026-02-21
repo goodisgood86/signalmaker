@@ -14,10 +14,13 @@ const cfgEnabledEl = document.getElementById("cfgEnabled");
 const cfgSymbolChipsEl = document.getElementById("cfgSymbolChips");
 const cfgSymbolEl = document.getElementById("cfgSymbol");
 const cfgMarketEl = document.getElementById("cfgMarket");
+const cfgMarketSelectEl = document.getElementById("cfgMarketSelect");
 const cfgIntervalEl = document.getElementById("cfgInterval");
 const cfgModeEl = document.getElementById("cfgMode");
 const cfgOrderSizeEl = document.getElementById("cfgOrderSize");
 const cfgDailyLossEl = document.getElementById("cfgDailyLoss");
+const cfgFuturesLeverageEl = document.getElementById("cfgFuturesLeverage");
+const cfgLeverageWrapEl = document.getElementById("cfgLeverageWrap");
 const cfgTpModeEl = document.getElementById("cfgTpMode");
 const cfgTpPctEl = document.getElementById("cfgTpPct");
 const cfgSlModeEl = document.getElementById("cfgSlMode");
@@ -57,6 +60,7 @@ const logicModalCloseBtnEl = document.getElementById("logicModalCloseBtn");
 
 const SYMBOLS = ["ALL", "BTCUSDT", "ETHUSDT", "XRPUSDT", "DOGEUSDT", "SUIUSDT", "SOLUSDT", "CROSSUSDT"];
 const TRADE_SYMBOLS = ["BTCUSDT", "ETHUSDT", "XRPUSDT", "DOGEUSDT", "SUIUSDT", "SOLUSDT", "CROSSUSDT"];
+const RUN_SYMBOLS = ["ALL", ...TRADE_SYMBOLS];
 const MODES = [
   { v: "ALL", t: "전체 모드" },
   { v: "balanced", t: "기본 모드" },
@@ -91,7 +95,7 @@ let lastCollateralFetchMs = 0;
 const COLLATERAL_MIN_INTERVAL_MS = 30000;
 const STATS_REFRESH_INTERVAL_MS = 60000;
 let latestOpenCount = null;
-let runningSymbol = "BTCUSDT";
+let runningSymbol = "ALL";
 let latestTickStatusText = "";
 
 function fmtPrice(v) {
@@ -257,18 +261,33 @@ function modeText(mode) {
   return m || "-";
 }
 
-function marketBySymbol(symbol) {
-  return String(symbol || "").toUpperCase() === "CROSSUSDT" ? "futures" : "spot";
-}
-
 function normalizeTradeSymbol(symbol) {
   const s = String(symbol || "").toUpperCase();
-  return TRADE_SYMBOLS.includes(s) ? s : "BTCUSDT";
+  return RUN_SYMBOLS.includes(s) ? s : "ALL";
+}
+
+function normalizeMarketValue(v) {
+  const m = String(v || "").toLowerCase().trim();
+  return m === "futures" ? "futures" : "spot";
+}
+
+function applyMarketSelection(market) {
+  const m = normalizeMarketValue(market);
+  if (cfgMarketEl) cfgMarketEl.value = m;
+  if (cfgMarketSelectEl) cfgMarketSelectEl.value = m;
+  const isFutures = m === "futures";
+  if (cfgLeverageWrapEl) cfgLeverageWrapEl.hidden = !isFutures;
+  if (cfgFuturesLeverageEl) {
+    cfgFuturesLeverageEl.disabled = !isFutures;
+    if (!String(cfgFuturesLeverageEl.value || "").trim()) cfgFuturesLeverageEl.value = "3";
+    const lev = Math.max(1, Math.min(50, Math.round(Number(cfgFuturesLeverageEl.value || 3))));
+    cfgFuturesLeverageEl.value = String(lev);
+  }
 }
 
 function updateRunningSymbolChip() {
   if (!cfgRunningSymbolChipEl) return;
-  const symbol = normalizeTradeSymbol(runningSymbol || cfgSymbolEl?.value || "BTCUSDT");
+  const symbol = normalizeTradeSymbol(runningSymbol || cfgSymbolEl?.value || "ALL");
   if (!autoRunActive) {
     cfgRunningSymbolChipEl.hidden = true;
     cfgRunningSymbolChipEl.textContent = "";
@@ -279,9 +298,8 @@ function updateRunningSymbolChip() {
 }
 
 function applySymbolSelection(symbol) {
-  const target = normalizeTradeSymbol(symbol || "BTCUSDT");
+  const target = normalizeTradeSymbol(symbol || "ALL");
   if (cfgSymbolEl) cfgSymbolEl.value = target;
-  if (cfgMarketEl) cfgMarketEl.value = marketBySymbol(target);
   runningSymbol = target;
   updateRunningSymbolChip();
   if (!cfgSymbolChipsEl) return;
@@ -445,8 +463,7 @@ function updateSaveButtonState() {
 
 function selectedMarketAvailable(collateral) {
   if (!collateral || typeof collateral !== "object") return null;
-  const symbol = String(cfgSymbolEl?.value || "BTCUSDT");
-  const market = marketBySymbol(symbol);
+  const market = normalizeMarketValue(cfgMarketSelectEl?.value || cfgMarketEl?.value || "spot");
   if (market === "futures") return Number(collateral?.futures?.available_usdt ?? NaN);
   return Number(collateral?.spot?.available_usdt ?? NaN);
 }
@@ -565,7 +582,8 @@ async function loadRuntimeStatus() {
     const data = await fetchJSON("/api/auto_trade/runtime");
     const runtime = data?.runtime || {};
     autoRunActive = Boolean(runtime?.enabled);
-    runningSymbol = normalizeTradeSymbol(runtime?.symbol || cfgSymbolEl?.value || "BTCUSDT");
+    const tickSignalSymbol = String(runtime?.last_tick?.signal?.symbol || "").toUpperCase();
+    runningSymbol = normalizeTradeSymbol(tickSignalSymbol || runtime?.symbol || cfgSymbolEl?.value || "ALL");
     const lastTick = runtime?.last_tick;
     if (lastTick && typeof lastTick === "object" && String(lastTick?.action || "").trim()) {
       setTickStatusFromResponse({
@@ -593,12 +611,17 @@ function setUnlockBusy(busy) {
 function applyConfig(cfg) {
   if (!cfg || typeof cfg !== "object") return;
   autoRunActive = Boolean(cfg.enabled);
-  runningSymbol = normalizeTradeSymbol(cfg.symbol || cfgSymbolEl?.value || "BTCUSDT");
+  runningSymbol = normalizeTradeSymbol(cfg.symbol || cfgSymbolEl?.value || "ALL");
   if (cfgEnabledEl) cfgEnabledEl.checked = autoRunActive;
-  applySymbolSelection(String(cfg.symbol || "BTCUSDT"));
+  applySymbolSelection(String(cfg.symbol || "ALL"));
+  applyMarketSelection(String(cfg.market || "spot"));
   if (cfgIntervalEl) cfgIntervalEl.value = String(cfg.interval || "5m");
   if (cfgModeEl) cfgModeEl.value = String(cfg.mode || "balanced");
   if (cfgOrderSizeEl) cfgOrderSizeEl.value = String(Number(cfg.order_size_usdt || 30));
+  if (cfgFuturesLeverageEl) {
+    const lev = Math.max(1, Math.min(50, Math.round(Number(cfg.futures_leverage || 3))));
+    cfgFuturesLeverageEl.value = String(lev);
+  }
   if (cfgDailyLossEl) cfgDailyLossEl.value = String(Number(cfg.daily_max_loss_usdt || 0));
   const tpPct = Number(cfg.take_profit_pct || 0);
   if (cfgTpModeEl) cfgTpModeEl.value = tpPct > 0 ? "manual" : "auto";
@@ -618,8 +641,9 @@ function applyConfig(cfg) {
 }
 
 function collectConfigPayload() {
-  const symbol = String(cfgSymbolEl?.value || "BTCUSDT").toUpperCase();
-  const market = marketBySymbol(symbol);
+  const symbol = "ALL";
+  const market = normalizeMarketValue(cfgMarketSelectEl?.value || cfgMarketEl?.value || "spot");
+  const futuresLeverage = Math.max(1, Math.min(50, Math.round(Number(cfgFuturesLeverageEl?.value || 3))));
   const tpMode = String(cfgTpModeEl?.value || "auto").toLowerCase();
   const slMode = String(cfgSlModeEl?.value || "auto").toLowerCase();
   const tpInput = Number(cfgTpPctEl?.value || 0);
@@ -634,6 +658,7 @@ function collectConfigPayload() {
     interval: String(cfgIntervalEl?.value || "5m"),
     mode: String(cfgModeEl?.value || "balanced"),
     order_size_usdt: Number(cfgOrderSizeEl?.value || 30),
+    futures_leverage: futuresLeverage,
     daily_max_loss_usdt: Number(cfgDailyLossEl?.value || 0),
     take_profit_pct: tpPct,
     stop_loss_pct: slPct,
@@ -646,9 +671,11 @@ function validateConfigForSave(payload) {
   const missing = [];
   const p = payload && typeof payload === "object" ? payload : {};
   const symbol = String(p.symbol || "").toUpperCase();
+  const market = normalizeMarketValue(p.market);
   const interval = String(p.interval || "");
   const mode = String(p.mode || "");
   const orderSize = Number(p.order_size_usdt);
+  const futuresLeverage = Number(p.futures_leverage);
   const dailyLoss = Number(p.daily_max_loss_usdt);
   const maxOpen = Number(p.max_open_positions);
   const tpMode = String(cfgTpModeEl?.value || "auto").toLowerCase();
@@ -656,7 +683,11 @@ function validateConfigForSave(payload) {
   const tpPctInput = Number(cfgTpPctEl?.value || 0);
   const slPctInput = Number(cfgSlPctEl?.value || 0);
 
-  if (!TRADE_SYMBOLS.includes(symbol)) missing.push("코인 선택");
+  if (symbol !== "ALL") missing.push("스캔 대상");
+  if (!["spot", "futures"].includes(market)) missing.push("거래 마켓");
+  if (market === "futures" && (!Number.isFinite(futuresLeverage) || futuresLeverage < 1 || futuresLeverage > 50)) {
+    missing.push("선물 배수 (1~50)");
+  }
   if (!["5m", "1h", "4h"].includes(interval)) missing.push("분석 타임");
   if (!["balanced", "aggressive"].includes(mode)) missing.push("투자모드");
   if (!Number.isFinite(orderSize) || orderSize < 10) missing.push("1회 거래금액 (10 이상)");
@@ -1084,7 +1115,8 @@ function initConfigInputs() {
   if (cfgMaxOpenEl && !String(cfgMaxOpenEl.value || "").trim()) cfgMaxOpenEl.value = "2";
   clampMaxOpenInput();
   if (cfgCooldownMinEl) cfgCooldownMinEl.value = "0";
-  applySymbolSelection(String(cfgSymbolEl?.value || "BTCUSDT"));
+  applySymbolSelection("ALL");
+  applyMarketSelection(String(cfgMarketEl?.value || "spot"));
   applyExitModeUI();
 }
 
@@ -1156,6 +1188,18 @@ if (cfgRunBtnEl) cfgRunBtnEl.addEventListener("click", () => runNow());
 if (cfgTopRunBtnEl) cfgTopRunBtnEl.addEventListener("click", () => toggleTopRun());
 if (cfgIntervalEl) cfgIntervalEl.addEventListener("change", () => setConfigDirty(true));
 if (cfgModeEl) cfgModeEl.addEventListener("change", () => setConfigDirty(true));
+if (cfgMarketSelectEl)
+  cfgMarketSelectEl.addEventListener("change", () => {
+    applyMarketSelection(cfgMarketSelectEl.value);
+    setConfigDirty(true);
+    evaluateCollateralState();
+  });
+if (cfgFuturesLeverageEl)
+  cfgFuturesLeverageEl.addEventListener("input", () => {
+    const lev = Math.max(1, Math.min(50, Math.round(Number(cfgFuturesLeverageEl.value || 3))));
+    cfgFuturesLeverageEl.value = String(lev);
+    setConfigDirty(true);
+  });
 if (cfgTpModeEl)
   cfgTpModeEl.addEventListener("change", () => {
     applyExitModeUI();

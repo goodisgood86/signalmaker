@@ -48,6 +48,8 @@ const buyPctEl = document.getElementById("buyPct");
 const sellPctEl = document.getElementById("sellPct");
 const confEl = document.getElementById("confidence");
 const regimeEl = document.getElementById("regime");
+const positionStateEl = document.getElementById("positionState");
+const whaleStateEl = document.getElementById("whaleState");
 const volumeStateEl = document.getElementById("volumeState");
 const asofEl = document.getElementById("asof");
 const explainDetailEl = document.getElementById("explainDetail");
@@ -294,6 +296,8 @@ function resetAnalysisUI(note = "코인 변경: 계산 중...") {
   if (sellPctEl) sellPctEl.textContent = "-";
   if (confEl) confEl.textContent = "-";
   if (regimeEl) regimeEl.textContent = "-";
+  if (positionStateEl) positionStateEl.textContent = "-";
+  if (whaleStateEl) whaleStateEl.textContent = "-";
   if (volumeStateEl) volumeStateEl.textContent = "-";
   if (actionBadgeEl) {
     actionBadgeEl.textContent = "WAIT";
@@ -1834,7 +1838,7 @@ function hasEntryReaction(side, entryLo, entryHi, klines) {
   return false;
 }
 
-function calcSignalScore({ rawDiff, conf, regime, side, lowVolumeBlock, swingConflict, reversalReady }) {
+function calcSignalScore({ rawDiff, conf, regime, side, lowVolumeBlock, swingConflict, reversalReady, whaleScore = 0 }) {
   const edge = Math.abs(Number(rawDiff) || 0);
   const edgeScore = Math.max(0, Math.min(30, (edge / 20) * 30));
   const c = Number(conf);
@@ -1845,7 +1849,11 @@ function calcSignalScore({ rawDiff, conf, regime, side, lowVolumeBlock, swingCon
   const sideScore = s === "BUY" || s === "SELL" ? 15 : 0;
   const fibScore = reversalReady ? 10 : swingConflict ? 0 : 4;
   const momentumScore = lowVolumeBlock ? 1 : 5;
-  const total = edgeScore + confScore + regimeScore + sideScore + fibScore + momentumScore;
+  const whale = Math.max(-1, Math.min(1, Number(whaleScore) || 0));
+  let whaleFlowScore = 0;
+  if (s === "BUY") whaleFlowScore = Math.max(0, whale) * 10;
+  else if (s === "SELL") whaleFlowScore = Math.max(0, -whale) * 10;
+  const total = edgeScore + confScore + regimeScore + sideScore + fibScore + momentumScore + whaleFlowScore;
   return {
     total: Math.max(0, Math.min(100, total)),
     edge: edgeScore,
@@ -1854,6 +1862,7 @@ function calcSignalScore({ rawDiff, conf, regime, side, lowVolumeBlock, swingCon
     side: sideScore,
     fib: fibScore,
     momentum: momentumScore,
+    whale: whaleFlowScore,
   };
 }
 
@@ -1864,6 +1873,9 @@ function renderActionSummary(analysis, fibPlan) {
   const sell = Number(analysis?.sell_pct);
   const conf = Number(analysis?.confidence);
   const regime = String(analysis?.regime || "").toUpperCase();
+  const whaleObj = analysis?.whale_sentiment || {};
+  const whaleScore = Number(whaleObj?.score);
+  const whaleLabel = String(whaleObj?.label || "중립");
   const close = Number(analysis?.close);
   const rawDiff = buy - sell;
   const hasFibSwing = Boolean(fibPlan && typeof fibPlan?.isUpMove === "boolean");
@@ -1962,6 +1974,10 @@ function renderActionSummary(analysis, fibPlan) {
       : "주요 기여값 없음";
   const regimeTxt =
     regime === "TREND" ? "추세장" : regime === "RANGE" ? "횡보장" : regime === "HIGH_VOL" ? "고변동장" : "중립장";
+  if (whaleStateEl) {
+    if (Number.isFinite(whaleScore)) whaleStateEl.textContent = `${whaleLabel}\n(${whaleScore >= 0 ? "+" : ""}${whaleScore.toFixed(2)})`;
+    else whaleStateEl.textContent = whaleLabel || "중립";
+  }
   let verdict = "그래서 관망이 유리합니다.";
   if (spotSellBlocked) verdict = "그래서 하락 우세지만 스팟 숏 금지로 자동매매는 대기입니다.";
   if (side === "BUY") verdict = "그래서 매수 우세로 판단합니다.";
@@ -2176,6 +2192,7 @@ function renderActionSummary(analysis, fibPlan) {
     lowVolumeBlock,
     swingConflict: scoreSwingConflict,
     reversalReady,
+    whaleScore,
   });
   const passSignalBase = signalScore.total >= scoreThresholdBase;
   const passSignalAgg = signalScore.total >= scoreThresholdAggressive;
@@ -2197,9 +2214,10 @@ function renderActionSummary(analysis, fibPlan) {
       const lines = [
         `방향: ${sideLabel} ${sidePct.toFixed(2)}% (보정 ${swingBiasTxt}) | 신뢰도 ${(conf * 100).toFixed(1)}% | 레짐: ${regimeTxt}`,
         `점수: ${signalScore.total.toFixed(1)} / 100 (기본 ${scoreThresholdBase}, 공격 ${scoreThresholdAggressive})`,
-        `구성: Edge ${signalScore.edge.toFixed(1)} · Conf ${signalScore.conf.toFixed(1)} · Regime ${signalScore.regime.toFixed(
+        `구성: 우위 ${signalScore.edge.toFixed(1)} · 신뢰 ${signalScore.conf.toFixed(1)} · 레짐 ${signalScore.regime.toFixed(
           1
-        )} · Side ${signalScore.side.toFixed(1)} · Fib ${signalScore.fib.toFixed(1)} · 모멘텀 ${signalScore.momentum.toFixed(1)}`,
+        )} · 방향 ${signalScore.side.toFixed(1)} · 피보 ${signalScore.fib.toFixed(1)} · 모멘텀 ${signalScore.momentum.toFixed(1)} · 고래 ${signalScore.whale.toFixed(1)}`,
+        `고래심리: ${whaleLabel}${Number.isFinite(whaleScore) ? ` (${whaleScore >= 0 ? "+" : ""}${whaleScore.toFixed(2)})` : ""}`,
         "규칙: 공격모드는 기준점수만 완화, 안전필터(담보/일손실/손절무효/스팟 숏금지)는 동일 적용",
       ];
       if (!passSignal) lines.push("미통과: 신호 점수 부족");
@@ -2212,7 +2230,7 @@ function renderActionSummary(analysis, fibPlan) {
   if (stepFibDetailEl) {
     stepFibDetailEl.textContent =
       Number.isFinite(entryLo) && Number.isFinite(entryHi)
-        ? `현재가: ${formatPrice(close)}\n피보 진입구간(하단~상단): ${formatPrice(entryLo)} ~ ${formatPrice(entryHi)} USDT\n허용오차: ±${formatPrice(
+        ? `현재가: ${formatPrice(close)}\n피보 진입구간: ${formatPrice(entryLo)} ~ ${formatPrice(entryHi)} USDT\n허용오차: ±${formatPrice(
             fibTol
           )}`
         : "피보 진입구간 계산 대기";
@@ -2300,6 +2318,13 @@ function renderActionSummary(analysis, fibPlan) {
       decisionFinalEl.textContent = "관망 후 다음 시그널 확인";
     }
   }
+  if (positionStateEl) {
+    if (reversalOverride) positionStateEl.textContent = "하락추세 반등 롱";
+    else if (side === "BUY") positionStateEl.textContent = "롱";
+    else if (side === "SELL") positionStateEl.textContent = "숏";
+    else if (spotSellBlocked) positionStateEl.textContent = "숏 신호(현물 대기)";
+    else positionStateEl.textContent = "관망";
+  }
   if (actionReadGuideEl) actionReadGuideEl.textContent = readGuide;
   if (entryTableSwingEl && !fibPlan) entryTableSwingEl.textContent = "-";
   if (entrySwingBadgeEl && !fibPlan) setSwingBadge("", "스윙 상태: -");
@@ -2345,10 +2370,11 @@ function renderActionSummary(analysis, fibPlan) {
       }${swingBias.toFixed(2)}%p, 반영차이 ${diff >= 0 ? "+" : ""}${diff.toFixed(2)}%p)\n` +
       `- 신뢰도 ${(conf * 100).toFixed(1)}% (지표 일치도)\n` +
       `- 레짐 ${regimeTxt} (${regime || "-"})\n` +
+      `- 고래심리 ${whaleLabel}${Number.isFinite(whaleScore) ? ` (${whaleScore >= 0 ? "+" : ""}${whaleScore.toFixed(2)})` : ""}\n` +
       `- 신호점수 ${signalScore.total.toFixed(1)}점 (기본 ${scoreThresholdBase} / 공격 ${scoreThresholdAggressive})\n` +
-      `- 점수구성 Edge ${signalScore.edge.toFixed(1)} / Conf ${signalScore.conf.toFixed(1)} / Regime ${signalScore.regime.toFixed(
+      `- 점수구성 우위 ${signalScore.edge.toFixed(1)} / 신뢰 ${signalScore.conf.toFixed(1)} / 레짐 ${signalScore.regime.toFixed(
         1
-      )} / Side ${signalScore.side.toFixed(1)} / Fib ${signalScore.fib.toFixed(1)} / 모멘텀 ${signalScore.momentum.toFixed(1)}\n` +
+      )} / 방향 ${signalScore.side.toFixed(1)} / 피보 ${signalScore.fib.toFixed(1)} / 모멘텀 ${signalScore.momentum.toFixed(1)} / 고래 ${signalScore.whale.toFixed(1)}\n` +
       `- 셋업 ${setupTxt}\n\n` +
       `[왜 이렇게 나왔나]\n` +
       `- 주요 반영값: ${topTxt}\n` +

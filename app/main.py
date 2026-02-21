@@ -243,7 +243,8 @@ _WS_ANALYSIS_CACHE_MAX = max(16, int(str(os.getenv("WS_ANALYSIS_CACHE_MAX", "40"
 _AUTO_ALLOWED_MODES = {"balanced", "aggressive"}
 _AUTO_ALLOWED_RECORD_STATUS = {"OPEN", "TP", "SL", "CLOSED_FAIL"}
 _AUTO_LINK_STATUS = {"CONNECTED"}
-_AUTO_ALLOWED_SYMBOLS = {"BTCUSDT", "ETHUSDT", "XRPUSDT", "DOGEUSDT", "SUIUSDT", "SOLUSDT", "CROSSUSDT"}
+_AUTO_SYMBOL_SCAN_ORDER = ["BTCUSDT", "ETHUSDT", "XRPUSDT", "DOGEUSDT", "SUIUSDT", "SOLUSDT", "CROSSUSDT"]
+_AUTO_ALLOWED_SYMBOLS = set(_AUTO_SYMBOL_SCAN_ORDER)
 _AUTH_COOKIE_NAME = "coin_auth_session"
 _AUTH_SESSION_TTL_S = max(1800, int(str(os.getenv("APP_AUTH_SESSION_TTL_S", "43200")) or "43200"))
 _AUTH_SESSIONS_MAX = max(64, int(str(os.getenv("APP_AUTH_SESSIONS_MAX", "512")) or "512"))
@@ -306,6 +307,11 @@ _AUTO_WS_PRICE_RECONNECT_S = max(
 )
 _AUTO_WS_PRICE_CACHE: Dict[str, Dict[str, Any]] = {}
 _AUTO_WS_PRICE_TASKS: List[asyncio.Task] = []
+_AUTO_WHALE_SENTIMENT_CACHE: Dict[str, Dict[str, Any]] = {}
+_AUTO_WHALE_SENTIMENT_TTL_S = max(
+    10.0,
+    float(str(os.getenv("AUTO_WHALE_SENTIMENT_TTL_S", "45")) or "45"),
+)
 
 
 def _auth_expected_hash() -> str:
@@ -525,12 +531,15 @@ def _auto_set_runtime_state(*, user_id: int, source: str, result: Any) -> None:
             "regime",
             "side",
             "diff",
+            "symbol",
             "score",
             "score_base",
             "score_aggressive",
             "score_threshold",
             "score_mode",
             "reversal_ready",
+            "whale_score",
+            "whale_label",
         ):
             if k not in signal:
                 continue
@@ -1487,6 +1496,7 @@ def _calc_pass_check_from_df(
             swing_conflict=score_swing_conflict,
             low_volume_block=low_volume_block,
             reversal_ready=reversal_ready,
+            whale_score=0.0,
         )
         score_threshold = float(_AUTO_SIGNAL_SCORE_BASE)
         pass_signal_score = float(score_pack.get("total", 0.0) or 0.0) >= score_threshold
@@ -1913,10 +1923,11 @@ def _auto_default_config() -> Dict[str, Any]:
     return {
         "enabled": False,
         "mode": "balanced",
-        "symbol": "BTCUSDT",
+        "symbol": "ALL",
         "market": "spot",
         "interval": "5m",
         "order_size_usdt": 120.0,
+        "futures_leverage": 3,
         "take_profit_pct": 0.0,
         "stop_loss_pct": 0.0,
         "daily_max_loss_usdt": 120.0,
@@ -1943,6 +1954,55 @@ def _auto_is_missing_table_error(err: HTTPException, table_name: str) -> bool:
         or "could not find table" in msg
         or "relation" in msg
     )
+
+
+def _auto_is_missing_column_error(err: HTTPException, table_name: str, column_name: str) -> bool:
+    msg = str(getattr(err, "detail", "")).lower()
+    t = str(table_name or "").lower()
+    c = str(column_name or "").lower()
+    if not t or not c:
+        return False
+    if t not in msg or c not in msg:
+        return False
+    return (
+        "column" in msg
+        and (
+            "does not exist" in msg
+            or "schema cache" in msg
+            or "could not find" in msg
+        )
+    )
+
+
+def _auto_config_select_fields(*, include_leverage: bool) -> str:
+    cols = [
+        "id",
+        "user_id",
+        "enabled",
+        "mode",
+        "symbol",
+        "market",
+        "interval",
+        "order_size_usdt",
+        "take_profit_pct",
+        "stop_loss_pct",
+        "daily_max_loss_usdt",
+        "cooldown_min",
+        "max_open_positions",
+        "last_run_ms",
+        "created_ms",
+        "updated_ms",
+    ]
+    if include_leverage:
+        cols.append("futures_leverage")
+    return ",".join(cols)
+
+
+def _auto_symbol_scan_list(market: str) -> List[str]:
+    m = str(market or "").lower().strip()
+    if m == "spot":
+        return [s for s in _AUTO_SYMBOL_SCAN_ORDER if s != "CROSSUSDT"]
+    return list(_AUTO_SYMBOL_SCAN_ORDER)
 
 
 def _auto_int_or_none(v: Any) -> int | None:
@@ -2084,9 +2144,10 @@ def _auto_normalize_config(raw: Dict[str, Any] | None) -> Dict[str, Any]:
     out["enabled"] = bool(src.get("enabled", base["enabled"]))
     out["mode"] = mode if mode in _AUTO_ALLOWED_MODES else base["mode"]
     out["market"] = market if market in ALLOWED_MARKETS else base["market"]
-    out["symbol"] = symbol if symbol.endswith("USDT") else base["symbol"]
+    out["symbol"] = symbol if (symbol == "ALL" or symbol.endswith("USDT")) else base["symbol"]
     out["interval"] = interval if interval in ALLOWED_INTERVALS else base["interval"]
     out["order_size_usdt"] = _auto_clip_number(src.get("order_size_usdt"), 10.0, 100000.0, base["order_size_usdt"])
+    out["futures_leverage"] = int(_auto_clip_number(src.get("futures_leverage"), 1.0, 50.0, float(base["futures_leverage"])))
     out["take_profit_pct"] = _auto_clip_number(src.get("take_profit_pct"), 0.0, 20.0, base["take_profit_pct"])
     out["stop_loss_pct"] = _auto_clip_number(src.get("stop_loss_pct"), 0.0, 20.0, base["stop_loss_pct"])
     out["daily_max_loss_usdt"] = _auto_clip_number(
@@ -2245,6 +2306,7 @@ def _auto_calc_signal_score(
     swing_conflict: bool,
     low_volume_block: bool,
     reversal_ready: bool,
+    whale_score: float = 0.0,
 ) -> Dict[str, float]:
     edge = abs(float(raw_diff))
     edge_score = max(0.0, min(30.0, (edge / 20.0) * 30.0))
@@ -2255,7 +2317,8 @@ def _auto_calc_signal_score(
     side_score = 15.0 if str(side or "").upper() in {"BUY", "SELL"} else 0.0
     fib_ready_score = 10.0 if bool(reversal_ready) else 4.0 if (not bool(swing_conflict)) else 0.0
     momentum_score = 1.0 if bool(low_volume_block) else 5.0
-    total = edge_score + conf_score + regime_score + side_score + fib_ready_score + momentum_score
+    whale_flow_score = _auto_whale_side_bias(whale_score, side) * 10.0
+    total = edge_score + conf_score + regime_score + side_score + fib_ready_score + momentum_score + whale_flow_score
     return {
         "total": max(0.0, min(100.0, total)),
         "edge": edge_score,
@@ -2264,6 +2327,7 @@ def _auto_calc_signal_score(
         "side": side_score,
         "fib": fib_ready_score,
         "momentum": momentum_score,
+        "whale": whale_flow_score,
     }
 
 
@@ -2710,20 +2774,32 @@ async def _auto_fetch_kline_cache(records: List[Dict[str, Any]], now_ts: float) 
 
 
 async def _auto_get_or_create_config(user_id: int) -> Dict[str, Any]:
+    select_fields = _auto_config_select_fields(include_leverage=True)
     try:
         rows = await _sb_request(
             "GET",
             "/rest/v1/auto_trade_settings",
             params={
-                "select": "id,user_id,enabled,mode,symbol,market,interval,order_size_usdt,take_profit_pct,stop_loss_pct,daily_max_loss_usdt,cooldown_min,max_open_positions,last_run_ms,created_ms,updated_ms",
+                "select": select_fields,
                 "user_id": f"eq.{int(user_id)}",
                 "limit": "1",
             },
         )
     except HTTPException as e:
-        if _auto_is_missing_table_error(e, "auto_trade_settings"):
-            raise _auto_table_missing_error("auto_trade_settings")
-        raise
+        if _auto_is_missing_column_error(e, "auto_trade_settings", "futures_leverage"):
+            rows = await _sb_request(
+                "GET",
+                "/rest/v1/auto_trade_settings",
+                params={
+                    "select": _auto_config_select_fields(include_leverage=False),
+                    "user_id": f"eq.{int(user_id)}",
+                    "limit": "1",
+                },
+            )
+        else:
+            if _auto_is_missing_table_error(e, "auto_trade_settings"):
+                raise _auto_table_missing_error("auto_trade_settings")
+            raise
     if isinstance(rows, list) and rows:
         row = dict(rows[0])
         norm = _auto_normalize_config(row)
@@ -2739,9 +2815,14 @@ async def _auto_get_or_create_config(user_id: int) -> Dict[str, Any]:
     try:
         created = await _sb_request("POST", "/rest/v1/auto_trade_settings", json_body=[body])
     except HTTPException as e:
-        if _auto_is_missing_table_error(e, "auto_trade_settings"):
-            raise _auto_table_missing_error("auto_trade_settings")
-        raise
+        if _auto_is_missing_column_error(e, "auto_trade_settings", "futures_leverage"):
+            legacy = dict(body)
+            legacy.pop("futures_leverage", None)
+            created = await _sb_request("POST", "/rest/v1/auto_trade_settings", json_body=[legacy])
+        else:
+            if _auto_is_missing_table_error(e, "auto_trade_settings"):
+                raise _auto_table_missing_error("auto_trade_settings")
+            raise
     if isinstance(created, list) and created:
         row = dict(created[0])
         norm = _auto_normalize_config(row)
@@ -2764,9 +2845,19 @@ async def _auto_update_config(user_id: int, config_id: Any, payload: Dict[str, A
             json_body=body,
         )
     except HTTPException as e:
-        if _auto_is_missing_table_error(e, "auto_trade_settings"):
-            raise _auto_table_missing_error("auto_trade_settings")
-        raise
+        if _auto_is_missing_column_error(e, "auto_trade_settings", "futures_leverage"):
+            legacy = dict(body)
+            legacy.pop("futures_leverage", None)
+            rows = await _sb_request(
+                "PATCH",
+                "/rest/v1/auto_trade_settings",
+                params={"id": f"eq.{config_id}", "user_id": f"eq.{int(user_id)}"},
+                json_body=legacy,
+            )
+        else:
+            if _auto_is_missing_table_error(e, "auto_trade_settings"):
+                raise _auto_table_missing_error("auto_trade_settings")
+            raise
     if isinstance(rows, list) and rows:
         row = dict(rows[0])
         norm = _auto_normalize_config(row)
@@ -4049,6 +4140,120 @@ async def _auto_binance_public_get(*, market: str, path: str, params: Dict[str, 
         raise HTTPException(status_code=502, detail="binance public response parse failed")
 
 
+def _auto_to_float(v: Any, default_v: float = 0.0) -> float:
+    try:
+        n = float(v)
+    except Exception:
+        return float(default_v)
+    return float(n) if math.isfinite(n) else float(default_v)
+
+
+def _auto_clamp(v: float, lo: float, hi: float) -> float:
+    return max(float(lo), min(float(hi), float(v)))
+
+
+def _auto_whale_side_bias(whale_score: float, side: str) -> float:
+    s = str(side or "").upper().strip()
+    raw = _auto_clamp(_auto_to_float(whale_score, 0.0), -1.0, 1.0)
+    if s == "BUY":
+        return max(0.0, raw)
+    if s == "SELL":
+        return max(0.0, -raw)
+    return 0.0
+
+
+def _auto_whale_label(score: float) -> str:
+    s = _auto_clamp(_auto_to_float(score, 0.0), -1.0, 1.0)
+    if s >= 0.55:
+        return "강한 매수 유입"
+    if s >= 0.2:
+        return "완만한 매수 우위"
+    if s <= -0.55:
+        return "강한 매도 압력"
+    if s <= -0.2:
+        return "완만한 매도 우위"
+    return "중립"
+
+
+async def _auto_fetch_whale_sentiment(*, symbol: str) -> Dict[str, Any]:
+    sym = str(symbol or "").upper().strip()
+    if not sym or not sym.endswith("USDT"):
+        return {
+            "score": 0.0,
+            "label": "중립",
+            "taker_ratio": 1.0,
+            "long_short_ratio": 1.0,
+            "oi_change_pct": 0.0,
+            "funding_rate": 0.0,
+            "asof_ms": int(time() * 1000),
+            "cached": False,
+        }
+    cache_key = f"fut:{sym}"
+    now_ts = float(time())
+    cached = _AUTO_WHALE_SENTIMENT_CACHE.get(cache_key)
+    if isinstance(cached, dict):
+        ts = float(cached.get("ts", 0.0) or 0.0)
+        if ts > 0 and (now_ts - ts) <= float(_AUTO_WHALE_SENTIMENT_TTL_S):
+            payload = dict(cached.get("payload") or {})
+            payload["cached"] = True
+            return payload
+
+    async def _safe_public(path: str, params: Dict[str, Any]) -> Any:
+        try:
+            return await _auto_binance_public_get(market="futures", path=path, params=params)
+        except Exception:
+            return None
+
+    taker_rows, long_short_rows, oi_rows, funding = await asyncio.gather(
+        _safe_public("/futures/data/takerlongshortRatio", {"symbol": sym, "period": "5m", "limit": 12}),
+        _safe_public("/futures/data/globalLongShortAccountRatio", {"symbol": sym, "period": "5m", "limit": 12}),
+        _safe_public("/futures/data/openInterestHist", {"symbol": sym, "period": "5m", "limit": 12}),
+        _safe_public("/fapi/v1/premiumIndex", {"symbol": sym}),
+    )
+
+    taker_ratio = 1.0
+    if isinstance(taker_rows, list) and taker_rows:
+        taker_ratio = _auto_to_float(taker_rows[-1].get("buySellRatio", 1.0), 1.0)
+    ls_ratio = 1.0
+    if isinstance(long_short_rows, list) and long_short_rows:
+        ls_ratio = _auto_to_float(long_short_rows[-1].get("longShortRatio", 1.0), 1.0)
+
+    oi_change_pct = 0.0
+    if isinstance(oi_rows, list) and len(oi_rows) >= 2:
+        oi_first = _auto_to_float(oi_rows[0].get("sumOpenInterestValue", oi_rows[0].get("sumOpenInterest", 0.0)), 0.0)
+        oi_last = _auto_to_float(
+            oi_rows[-1].get("sumOpenInterestValue", oi_rows[-1].get("sumOpenInterest", 0.0)),
+            0.0,
+        )
+        if oi_first > 0 and oi_last > 0:
+            oi_change_pct = ((oi_last / oi_first) - 1.0) * 100.0
+
+    funding_rate = 0.0
+    if isinstance(funding, dict):
+        funding_rate = _auto_to_float(funding.get("lastFundingRate", 0.0), 0.0)
+
+    taker_bias = _auto_clamp((taker_ratio - 1.0) / 0.35, -1.0, 1.0)
+    ls_bias = _auto_clamp((ls_ratio - 1.0) / 0.30, -1.0, 1.0)
+    oi_bias = _auto_clamp(oi_change_pct / 1.20, -1.0, 1.0)
+    funding_bias = _auto_clamp(funding_rate / 0.0008, -1.0, 1.0)
+    score = _auto_clamp((taker_bias * 0.46) + (ls_bias * 0.24) + (oi_bias * 0.20) + (funding_bias * 0.10), -1.0, 1.0)
+    payload = {
+        "score": round(score, 4),
+        "label": _auto_whale_label(score),
+        "taker_ratio": round(taker_ratio, 4),
+        "long_short_ratio": round(ls_ratio, 4),
+        "oi_change_pct": round(oi_change_pct, 4),
+        "funding_rate": round(funding_rate, 8),
+        "asof_ms": int(now_ts * 1000),
+        "cached": False,
+    }
+    _AUTO_WHALE_SENTIMENT_CACHE[cache_key] = {"ts": now_ts, "payload": dict(payload)}
+    if len(_AUTO_WHALE_SENTIMENT_CACHE) > 128:
+        for k in list(_AUTO_WHALE_SENTIMENT_CACHE.keys())[:32]:
+            _AUTO_WHALE_SENTIMENT_CACHE.pop(k, None)
+    return payload
+
+
 async def _auto_fetch_symbol_trade_rules(*, market: str, symbol: str) -> Dict[str, float]:
     m = str(market or "").lower().strip()
     sym = str(symbol or "").upper().strip()
@@ -4113,6 +4318,32 @@ async def _auto_fetch_symbol_trade_rules(*, market: str, symbol: str) -> Dict[st
         "min_qty": float(min_qty),
         "min_notional": float(min_notional),
         "tick_size": float(tick_size),
+    }
+
+
+async def _auto_set_futures_leverage(
+    *,
+    symbol: str,
+    leverage: int,
+    api_key: str,
+    api_secret: str,
+) -> Dict[str, Any]:
+    sym = str(symbol or "").upper().strip()
+    lev = int(max(1, min(125, int(leverage or 1))))
+    body = await _auto_binance_signed_call(
+        base_url=BINANCE_FUTURES_BASE_URL,
+        path="/fapi/v1/leverage",
+        api_key=api_key,
+        api_secret=api_secret,
+        method="POST",
+        extra_params={"symbol": sym, "leverage": lev},
+    )
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=502, detail="futures leverage response invalid")
+    return {
+        "symbol": sym,
+        "leverage": int(_auto_to_float(body.get("leverage", lev), lev)),
+        "max_notional_value": str(body.get("maxNotionalValue", "") or ""),
     }
 
 
@@ -4921,13 +5152,17 @@ async def _auto_delete_binance_link(user_id: int) -> None:
 
 def _auto_validate_config_required_fields(cfg: Dict[str, Any]) -> None:
     symbol = str(cfg.get("symbol", "")).upper().strip()
+    market = str(cfg.get("market", "")).lower().strip()
     interval = str(cfg.get("interval", "")).strip()
     mode = str(cfg.get("mode", "")).lower().strip()
     order_size = float(cfg.get("order_size_usdt", 0.0) or 0.0)
+    futures_leverage = int(float(cfg.get("futures_leverage", 1) or 1))
     daily_loss = float(cfg.get("daily_max_loss_usdt", 0.0) or 0.0)
     max_open = int(float(cfg.get("max_open_positions", 0) or 0))
-    if symbol not in _AUTO_ALLOWED_SYMBOLS:
+    if symbol != "ALL" and symbol not in _AUTO_ALLOWED_SYMBOLS:
         raise HTTPException(status_code=400, detail="설정 저장 불가: 코인 선택 값이 올바르지 않습니다.")
+    if market not in ALLOWED_MARKETS:
+        raise HTTPException(status_code=400, detail="설정 저장 불가: 마켓 값이 올바르지 않습니다.")
     if interval not in {"5m", "1h", "4h"}:
         raise HTTPException(status_code=400, detail="설정 저장 불가: 분석 타임 값이 올바르지 않습니다.")
     if mode not in _AUTO_ALLOWED_MODES:
@@ -4936,6 +5171,8 @@ def _auto_validate_config_required_fields(cfg: Dict[str, Any]) -> None:
         raise HTTPException(status_code=400, detail="설정 저장 불가: 1회 거래금액은 10 이상이어야 합니다.")
     if daily_loss < 1.0:
         raise HTTPException(status_code=400, detail="설정 저장 불가: 일 최대 손실은 1 이상이어야 합니다.")
+    if futures_leverage < 1 or futures_leverage > 50:
+        raise HTTPException(status_code=400, detail="설정 저장 불가: 선물 배수는 1~50 범위여야 합니다.")
     if max_open < 1 or max_open > 5:
         raise HTTPException(status_code=400, detail="설정 저장 불가: 동시 최대 포지션은 1~5 범위여야 합니다.")
     tp_pct = float(cfg.get("take_profit_pct", 0.0) or 0.0)
@@ -5234,8 +5471,10 @@ async def api_auto_trade_runtime():
         "runtime": {
             "enabled": bool(cfg.get("enabled")),
             "symbol": str(cfg.get("symbol") or ""),
+            "market": str(cfg.get("market") or ""),
             "mode": str(cfg.get("mode") or ""),
             "interval": str(cfg.get("interval") or ""),
+            "futures_leverage": int(cfg.get("futures_leverage", 1) or 1),
             "last_run_ms": int(cfg.get("last_run_ms", 0) or 0),
             "last_tick": dict(tick) if isinstance(tick, dict) else {},
         },
@@ -5317,6 +5556,348 @@ async def api_auto_trade_delete_binance_link(
     user_id = int(public_user.get("id"))
     await _auto_delete_binance_link(user_id)
     return {"ok": True, "link": _auto_public_binance_link(None)}
+
+
+async def _auto_eval_entry_candidate(
+    *,
+    symbol: str,
+    market: str,
+    interval: str,
+    mode: str,
+    now_ts: float,
+) -> Dict[str, Any]:
+    symbol_u = str(symbol or "").upper().strip()
+    market_u = str(market or "").lower().strip()
+    interval_v = str(interval or "5m").strip()
+    mode_v = str(mode or "balanced").lower().strip()
+
+    klines = await app.state.binance.klines(symbol=symbol_u, interval=interval_v, limit=500, now_ts=now_ts, market=market_u)
+    df = _klines_to_df(list(klines))
+    ind = compute_indicators(df)
+    if ind is None:
+        return {"ok": False, "action": "NO_SIGNAL", "reason": "NO_INDICATOR", "symbol": symbol_u}
+    close = float(df["close"].iloc[-1])
+    prev_close = float(df["close"].iloc[-2])
+    regime = classify_regime(df)
+    avwap_levels, vp = _build_levels(df)
+    score = score_signal_trendy(
+        close=close,
+        prev_close=prev_close,
+        ind=ind,
+        regime=regime.regime,
+        avwap_levels=avwap_levels,
+        volume_profile=vp,
+    )
+    raw_buy = score.buy_pct / 100.0
+    buy_prob, _, _ = _apply_calibration(raw_buy)
+    buy_pct = round(buy_prob * 100.0, 2)
+    sell_pct = round((1.0 - buy_prob) * 100.0, 2)
+    confidence = _confidence_from_buy_prob(buy_prob, raw_confidence=float(score.confidence))
+    whale_sentiment = await _auto_fetch_whale_sentiment(symbol=symbol_u)
+    swing = _latest_swing(df, lookback=200)
+    swing_up: Optional[bool] = None
+    if swing is not None:
+        swing_up = bool(int(swing.get("is_up", 0)))
+    decision = _auto_decide_signal(
+        buy_pct=buy_pct,
+        sell_pct=sell_pct,
+        confidence=confidence,
+        regime=regime.regime,
+        symbol=symbol_u,
+        market=market_u,
+        mode=mode_v,
+        swing_is_up=swing_up,
+    )
+    signal_info: Dict[str, Any] = {
+        "symbol": symbol_u,
+        "buy_pct": buy_pct,
+        "sell_pct": sell_pct,
+        "confidence": confidence,
+        "regime": regime.regime,
+        "side": decision["side"],
+        "diff": decision["diff"],
+        "raw_diff": decision["raw_diff"],
+        "whale_score": float(whale_sentiment.get("score", 0.0) or 0.0),
+        "whale_label": str(whale_sentiment.get("label", "중립")),
+    }
+
+    if swing is None or swing_up is None:
+        return {"ok": False, "action": "NO_SIGNAL", "reason": "NO_SWING", "symbol": symbol_u, "signal": signal_info}
+
+    atr14 = float(ind.atr14 or 0.0)
+
+    def _auto_plan_payload_for_side(side_v: str) -> Dict[str, Any] | None:
+        side_u = str(side_v or "").upper()
+        if side_u not in {"BUY", "SELL"}:
+            return None
+        p = _auto_build_fib_trade_plan(
+            side=side_u,
+            swing=swing,
+            close=close,
+            atr14=atr14,
+            mode=mode_v,
+        )
+        if not isinstance(p, dict):
+            return None
+        return {
+            "side": side_u,
+            "entry_price": round(float(p["entry_price"]), 8),
+            "entry_lo": round(float(p.get("entry_lo", p["entry_price"])), 8),
+            "entry_hi": round(float(p.get("entry_hi", p["entry_price"])), 8),
+            "stop_price": round(float(p["stop_price"]), 8),
+            "tp1_price": round(float(p["tp1_price"]), 8),
+            "tp2_price": round(float(p["tp2_price"]), 8),
+        }
+
+    def _auto_pick_preview_side(*cands: Any) -> str:
+        for c in cands:
+            s = str(c or "").upper()
+            if s not in {"BUY", "SELL"}:
+                continue
+            if market_u == "spot" and s == "SELL":
+                continue
+            return s
+        fallback = "BUY" if float(buy_pct) >= float(sell_pct) else "SELL"
+        if market_u == "spot" and fallback == "SELL":
+            fallback = "BUY"
+        return fallback
+
+    last_high = float(df["high"].iloc[-1])
+    last_low = float(df["low"].iloc[-1])
+    live_price = _auto_ws_price_get(market=market_u, symbol=symbol_u)
+    price_now = float(live_price if live_price > 0 else close)
+    low_volume_block = False
+    if len(df) >= 22:
+        cur_idx = max(1, len(df) - 2)
+        try:
+            cur_vol = float(df["volume"].iloc[cur_idx])
+            prev_avg = float(df["volume"].iloc[max(0, cur_idx - 20) : cur_idx].mean())
+            if math.isfinite(cur_vol) and math.isfinite(prev_avg) and prev_avg > 0 and cur_vol < prev_avg:
+                low_volume_block = True
+        except Exception:
+            low_volume_block = False
+
+    def _auto_plan_is_touched(plan_v: Dict[str, Any], _side_v: str) -> bool:
+        lo_zone = float(plan_v.get("entry_lo", plan_v.get("entry_price", 0.0)) or 0.0)
+        hi_zone = float(plan_v.get("entry_hi", plan_v.get("entry_price", 0.0)) or 0.0)
+        hi_bar = max(float(last_high), float(price_now))
+        lo_bar = min(float(last_low), float(price_now))
+        return _auto_entry_zone_touched(
+            entry_lo=lo_zone,
+            entry_hi=hi_zone,
+            high=hi_bar,
+            low=lo_bar,
+            close=price_now,
+        )
+
+    reversal_ready = False
+    if (not bool(swing_up)) and market_u in {"spot", "futures"}:
+        rp = _auto_build_fib_trade_plan(
+            side="BUY",
+            swing=swing,
+            close=close,
+            atr14=atr14,
+            mode=mode_v,
+        )
+        if isinstance(rp, dict):
+            rev_lo = float(rp.get("entry_lo", rp["entry_price"]))
+            rev_hi = float(rp.get("entry_hi", rp["entry_price"]))
+            reversal_ready = (
+                float(buy_pct) > float(sell_pct)
+                and float(confidence) >= float(_AUTO_REVERSAL_CONF_MIN)
+                and _auto_has_entry_reaction_df(side="BUY", entry_lo=rev_lo, entry_hi=rev_hi, df=df, lookback=5)
+            )
+
+    decision_side = str(decision.get("side", "WAIT")).upper()
+    if mode_v == "aggressive" and decision_side == "WAIT":
+        decision_side = _auto_pick_aggressive_side(buy_pct=buy_pct, sell_pct=sell_pct, market=market_u)
+    spot_sell_blocked = market_u == "spot" and decision_side == "SELL"
+    if spot_sell_blocked:
+        decision_side = "WAIT"
+    score_side = decision_side
+    if reversal_ready and score_side == "WAIT":
+        score_side = "BUY"
+    swing_conflict = score_side in {"BUY", "SELL"} and (not _auto_side_matches_swing(score_side, bool(swing_up)))
+    score_swing_conflict = swing_conflict and (not reversal_ready)
+    score_pack = _auto_calc_signal_score(
+        raw_diff=float(decision.get("raw_diff", 0.0)),
+        confidence=confidence,
+        regime=regime.regime,
+        side=score_side,
+        swing_conflict=score_swing_conflict,
+        low_volume_block=low_volume_block,
+        reversal_ready=reversal_ready,
+        whale_score=float(whale_sentiment.get("score", 0.0) or 0.0),
+    )
+    score_threshold = float(_AUTO_SIGNAL_SCORE_AGGR if mode_v == "aggressive" else _AUTO_SIGNAL_SCORE_BASE)
+    pass_signal_score = float(score_pack.get("total", 0.0) or 0.0) >= score_threshold
+    pass_reversal_override = reversal_ready and float(score_pack.get("total", 0.0) or 0.0) >= max(45.0, score_threshold - 8.0)
+    signal_info.update(
+        {
+            "score": round(float(score_pack.get("total", 0.0) or 0.0), 4),
+            "score_base": round(float(_AUTO_SIGNAL_SCORE_BASE), 4),
+            "score_aggressive": round(float(_AUTO_SIGNAL_SCORE_AGGR), 4),
+            "score_threshold": round(float(score_threshold), 4),
+            "score_mode": "aggressive" if mode_v == "aggressive" else "base",
+            "reversal_ready": 1.0 if reversal_ready else 0.0,
+        }
+    )
+
+    trade_side = decision_side if decision_side in {"BUY", "SELL"} else "WAIT"
+    if swing_conflict:
+        if reversal_ready:
+            trade_side = "BUY"
+        else:
+            trade_side = "WAIT"
+    if trade_side == "WAIT" and reversal_ready:
+        trade_side = "BUY"
+
+    if (not pass_signal_score) and (not pass_reversal_override):
+        preview_plan = _auto_plan_payload_for_side(
+            _auto_pick_preview_side(
+                "BUY" if reversal_ready else trade_side,
+                decision.get("side", ""),
+                "BUY" if bool(swing_up) else "SELL",
+            )
+        )
+        out = {"ok": False, "action": "NO_SIGNAL", "reason": "SIGNAL_SCORE_LOW", "symbol": symbol_u, "signal": signal_info}
+        if isinstance(preview_plan, dict):
+            out["plan"] = preview_plan
+        return out
+
+    if trade_side not in {"BUY", "SELL"}:
+        preview_plan = _auto_plan_payload_for_side(
+            _auto_pick_preview_side(decision.get("side", ""), "BUY" if bool(swing_up) else "SELL")
+        )
+        out = {
+            "ok": False,
+            "action": "NO_SIGNAL",
+            "reason": "SPOT_SELL_BLOCKED" if spot_sell_blocked else "SIGNAL_SIDE_WAIT",
+            "symbol": symbol_u,
+            "signal": signal_info,
+        }
+        if isinstance(preview_plan, dict):
+            out["plan"] = preview_plan
+        return out
+
+    if (trade_side == "BUY") and (not bool(swing_up)) and (not reversal_ready):
+        preview_plan = _auto_plan_payload_for_side("BUY")
+        out = {"ok": False, "action": "NO_SIGNAL", "reason": "REVERSAL_NOT_READY", "symbol": symbol_u, "signal": signal_info}
+        if isinstance(preview_plan, dict):
+            out["plan"] = preview_plan
+        return out
+
+    plan = _auto_build_fib_trade_plan(
+        side=trade_side,
+        swing=swing,
+        close=close,
+        atr14=atr14,
+        mode=mode_v,
+    )
+    if not isinstance(plan, dict):
+        return {"ok": False, "action": "NO_SIGNAL", "reason": "INVALID_PLAN", "symbol": symbol_u, "signal": signal_info}
+
+    entry_price = float(plan["entry_price"])
+    entry_lo = float(plan.get("entry_lo", entry_price))
+    entry_hi = float(plan.get("entry_hi", entry_price))
+    stop_price = float(plan["stop_price"])
+    plan_out = {
+        "side": trade_side,
+        "entry_price": round(float(plan["entry_price"]), 8),
+        "entry_lo": round(entry_lo, 8),
+        "entry_hi": round(entry_hi, 8),
+        "stop_price": round(float(plan["stop_price"]), 8),
+        "tp1_price": round(float(plan["tp1_price"]), 8),
+        "tp2_price": round(float(plan["tp2_price"]), 8),
+    }
+
+    if _auto_plan_invalidated(side=trade_side, stop_price=stop_price, price_now=price_now):
+        return {
+            "ok": False,
+            "action": "NO_SIGNAL",
+            "reason": "PLAN_INVALIDATED",
+            "symbol": symbol_u,
+            "signal": signal_info,
+            "plan": plan_out,
+        }
+
+    if _auto_zone_break_invalidated(side=trade_side, entry_lo=entry_lo, entry_hi=entry_hi, price_now=price_now):
+        return {
+            "ok": False,
+            "action": "NO_SIGNAL",
+            "reason": "ENTRY_ZONE_BREAK",
+            "symbol": symbol_u,
+            "signal": signal_info,
+            "plan": plan_out,
+        }
+
+    if _auto_chase_exceeded(side=trade_side, entry_lo=entry_lo, entry_hi=entry_hi, price_now=price_now):
+        return {
+            "ok": False,
+            "action": "NO_SIGNAL",
+            "reason": "ENTRY_CHASE_LIMIT",
+            "symbol": symbol_u,
+            "signal": signal_info,
+            "plan": plan_out,
+        }
+
+    rr_entry = _auto_plan_rr(
+        side=trade_side,
+        entry_price=price_now if price_now > 0 else entry_price,
+        stop_price=stop_price,
+        tp1_price=float(plan["tp1_price"]),
+    )
+    if rr_entry + 1e-12 < float(_AUTO_MIN_ENTRY_RR):
+        return {
+            "ok": False,
+            "action": "NO_SIGNAL",
+            "reason": "RR_TOO_LOW",
+            "symbol": symbol_u,
+            "signal": signal_info,
+            "plan": plan_out,
+            "rr": round(float(rr_entry), 6),
+            "min_rr": round(float(_AUTO_MIN_ENTRY_RR), 6),
+        }
+
+    entry_touched = _auto_plan_is_touched(plan, trade_side)
+    if not entry_touched:
+        return {
+            "ok": False,
+            "action": "WAIT_FIB_ENTRY",
+            "symbol": symbol_u,
+            "signal": signal_info,
+            "plan": plan_out,
+        }
+    rank_score = float(score_pack.get("total", 0.0) or 0.0) + abs(float(decision.get("diff", 0.0) or 0.0)) * 0.12 + confidence * 8.0
+    if reversal_ready:
+        rank_score += 2.0
+    return {
+        "ok": True,
+        "symbol": symbol_u,
+        "market": market_u,
+        "interval": interval_v,
+        "mode": mode_v,
+        "df": df,
+        "decision": decision,
+        "signal": signal_info,
+        "plan": plan,
+        "trade_side": trade_side,
+        "buy_pct": buy_pct,
+        "sell_pct": sell_pct,
+        "confidence": confidence,
+        "regime": regime.regime,
+        "swing": swing,
+        "swing_up": bool(swing_up),
+        "close": close,
+        "price_now": price_now,
+        "entry_price": entry_price,
+        "entry_lo": entry_lo,
+        "entry_hi": entry_hi,
+        "stop_price": stop_price,
+        "score_pack": score_pack,
+        "rank_score": round(rank_score, 6),
+        "whale_sentiment": whale_sentiment,
+    }
 
 
 async def _auto_trade_tick_core(
@@ -5422,330 +6003,102 @@ async def _auto_trade_tick_core(
             }
 
         now_ts = time()
-        klines = await app.state.binance.klines(symbol=symbol, interval=interval, limit=500, now_ts=now_ts, market=market)
-        df = _klines_to_df(list(klines))
-        ind = compute_indicators(df)
-        if ind is None:
-            raise HTTPException(status_code=400, detail="not enough data for auto trade indicators")
-        close = float(df["close"].iloc[-1])
-        prev_close = float(df["close"].iloc[-2])
-        regime = classify_regime(df)
-        avwap_levels, vp = _build_levels(df)
-        score = score_signal_trendy(
-            close=close,
-            prev_close=prev_close,
-            ind=ind,
-            regime=regime.regime,
-            avwap_levels=avwap_levels,
-            volume_profile=vp,
-        )
-        raw_buy = score.buy_pct / 100.0
-        buy_prob, _, _ = _apply_calibration(raw_buy)
-        buy_pct = round(buy_prob * 100.0, 2)
-        sell_pct = round((1.0 - buy_prob) * 100.0, 2)
-        confidence = _confidence_from_buy_prob(buy_prob, raw_confidence=float(score.confidence))
-        swing = _latest_swing(df, lookback=200)
-        swing_up: Optional[bool] = None
-        if swing is not None:
-            swing_up = bool(int(swing.get("is_up", 0)))
-        decision = _auto_decide_signal(
-            buy_pct=buy_pct,
-            sell_pct=sell_pct,
-            confidence=confidence,
-            regime=regime.regime,
-            symbol=symbol,
-            market=market,
-            mode=mode,
-            swing_is_up=swing_up,
-        )
-        signal_info = {
-            "buy_pct": buy_pct,
-            "sell_pct": sell_pct,
-            "confidence": confidence,
-            "regime": regime.regime,
-            "side": decision["side"],
-            "diff": decision["diff"],
-            "raw_diff": decision["raw_diff"],
-        }
-
-        if swing is None or swing_up is None:
-            await _auto_update_config(user_id, cfg_id, {**cfg, "last_run_ms": now_ms})
-            return {"ok": True, "action": "NO_SIGNAL", "reason": "NO_SWING", "signal": signal_info}
-
-        atr14 = float(ind.atr14 or 0.0)
-
-        def _auto_plan_payload_for_side(side_v: str) -> Dict[str, Any] | None:
-            side_u = str(side_v or "").upper()
-            if side_u not in {"BUY", "SELL"}:
-                return None
-            p = _auto_build_fib_trade_plan(
-                side=side_u,
-                swing=swing,
-                close=close,
-                atr14=atr14,
-                mode=mode,
-            )
-            if not isinstance(p, dict):
-                return None
-            return {
-                "side": side_u,
-                "entry_price": round(float(p["entry_price"]), 8),
-                "entry_lo": round(float(p.get("entry_lo", p["entry_price"])), 8),
-                "entry_hi": round(float(p.get("entry_hi", p["entry_price"])), 8),
-                "stop_price": round(float(p["stop_price"]), 8),
-                "tp1_price": round(float(p["tp1_price"]), 8),
-                "tp2_price": round(float(p["tp2_price"]), 8),
-            }
-
-        def _auto_pick_preview_side(*cands: Any) -> str:
-            for c in cands:
-                s = str(c or "").upper()
-                if s not in {"BUY", "SELL"}:
-                    continue
-                if market == "spot" and s == "SELL":
-                    continue
-                return s
-            fallback = "BUY" if float(buy_pct) >= float(sell_pct) else "SELL"
-            if market == "spot" and fallback == "SELL":
-                fallback = "BUY"
-            return fallback
-
-        last_high = float(df["high"].iloc[-1])
-        last_low = float(df["low"].iloc[-1])
-        live_price = _auto_ws_price_get(market=market, symbol=symbol)
-        price_now = float(live_price if live_price > 0 else close)
-        low_volume_block = False
-        if len(df) >= 22:
-            cur_idx = max(1, len(df) - 2)
+        cfg_symbol = str(symbol or "BTCUSDT").upper().strip() or "BTCUSDT"
+        futures_leverage = int(cfg.get("futures_leverage", 1) or 1)
+        if market != "futures":
+            futures_leverage = 1
+        scan_symbols = _auto_symbol_scan_list(market)
+        if cfg_symbol != "ALL":
+            scan_symbols = [cfg_symbol]
+        picked: Dict[str, Any] | None = None
+        scan_notes: List[Dict[str, Any]] = []
+        for scan_symbol in scan_symbols:
             try:
-                cur_vol = float(df["volume"].iloc[cur_idx])
-                prev_avg = float(df["volume"].iloc[max(0, cur_idx - 20) : cur_idx].mean())
-                if math.isfinite(cur_vol) and math.isfinite(prev_avg) and prev_avg > 0 and cur_vol < prev_avg:
-                    low_volume_block = True
-            except Exception:
-                low_volume_block = False
-
-        def _auto_plan_is_touched(plan_v: Dict[str, Any], _side_v: str) -> bool:
-            lo_zone = float(plan_v.get("entry_lo", plan_v.get("entry_price", 0.0)) or 0.0)
-            hi_zone = float(plan_v.get("entry_hi", plan_v.get("entry_price", 0.0)) or 0.0)
-            hi_bar = max(float(last_high), float(price_now))
-            lo_bar = min(float(last_low), float(price_now))
-            return _auto_entry_zone_touched(
-                entry_lo=lo_zone,
-                entry_hi=hi_zone,
-                high=hi_bar,
-                low=lo_bar,
-                close=price_now,
-            )
-
-        reversal_ready = False
-        if (not bool(swing_up)) and market in {"spot", "futures"}:
-            rp = _auto_build_fib_trade_plan(
-                side="BUY",
-                swing=swing,
-                close=close,
-                atr14=atr14,
-                mode=mode,
-            )
-            if isinstance(rp, dict):
-                rev_lo = float(rp.get("entry_lo", rp["entry_price"]))
-                rev_hi = float(rp.get("entry_hi", rp["entry_price"]))
-                reversal_ready = (
-                    float(buy_pct) > float(sell_pct)
-                    and float(confidence) >= float(_AUTO_REVERSAL_CONF_MIN)
-                    and _auto_has_entry_reaction_df(side="BUY", entry_lo=rev_lo, entry_hi=rev_hi, df=df, lookback=5)
+                evaluated = await _auto_eval_entry_candidate(
+                    symbol=scan_symbol,
+                    market=market,
+                    interval=interval,
+                    mode=mode,
+                    now_ts=now_ts,
                 )
-
-        decision_side = str(decision.get("side", "WAIT")).upper()
-        if mode == "aggressive" and decision_side == "WAIT":
-            decision_side = _auto_pick_aggressive_side(buy_pct=buy_pct, sell_pct=sell_pct, market=market)
-        spot_sell_blocked = market == "spot" and decision_side == "SELL"
-        if spot_sell_blocked:
-            decision_side = "WAIT"
-        score_side = decision_side
-        if reversal_ready and score_side == "WAIT":
-            score_side = "BUY"
-        swing_conflict = score_side in {"BUY", "SELL"} and (not _auto_side_matches_swing(score_side, bool(swing_up)))
-        score_swing_conflict = swing_conflict and (not reversal_ready)
-        score_pack = _auto_calc_signal_score(
-            raw_diff=float(decision.get("raw_diff", 0.0)),
-            confidence=confidence,
-            regime=regime.regime,
-            side=score_side,
-            swing_conflict=score_swing_conflict,
-            low_volume_block=low_volume_block,
-            reversal_ready=reversal_ready,
-        )
-        score_threshold = float(_AUTO_SIGNAL_SCORE_AGGR if mode == "aggressive" else _AUTO_SIGNAL_SCORE_BASE)
-        pass_signal_score = float(score_pack.get("total", 0.0) or 0.0) >= score_threshold
-        pass_reversal_override = reversal_ready and float(score_pack.get("total", 0.0) or 0.0) >= max(45.0, score_threshold - 8.0)
-        signal_info.update(
-            {
-                "score": round(float(score_pack.get("total", 0.0) or 0.0), 4),
-                "score_base": round(float(_AUTO_SIGNAL_SCORE_BASE), 4),
-                "score_aggressive": round(float(_AUTO_SIGNAL_SCORE_AGGR), 4),
-                "score_threshold": round(float(score_threshold), 4),
-                "score_mode": "aggressive" if mode == "aggressive" else "base",
-                "reversal_ready": 1.0 if reversal_ready else 0.0,
-            }
-        )
-
-        trade_side = decision_side if decision_side in {"BUY", "SELL"} else "WAIT"
-        if swing_conflict:
-            if reversal_ready:
-                trade_side = "BUY"
-            else:
-                trade_side = "WAIT"
-        if trade_side == "WAIT" and reversal_ready:
-            trade_side = "BUY"
-
-        if (not pass_signal_score) and (not pass_reversal_override):
-            preview_plan = _auto_plan_payload_for_side(
-                _auto_pick_preview_side(
-                    "BUY" if reversal_ready else trade_side,
-                    decision.get("side", ""),
-                    "BUY" if bool(swing_up) else "SELL",
+            except Exception as e:
+                if cfg_symbol != "ALL":
+                    raise
+                scan_notes.append({"symbol": scan_symbol, "action": "ERROR", "reason": f"{type(e).__name__}"})
+                continue
+            if not bool(evaluated.get("ok")):
+                scan_notes.append(
+                    {
+                        "symbol": scan_symbol,
+                        "action": str(evaluated.get("action", "")),
+                        "reason": str(evaluated.get("reason", "")),
+                        "score": float(evaluated.get("signal", {}).get("score", 0.0) or 0.0),
+                    }
                 )
+                if cfg_symbol != "ALL":
+                    await _auto_update_config(user_id, cfg_id, {**cfg, "last_run_ms": now_ms})
+                    out = {
+                        "ok": True,
+                        "action": str(evaluated.get("action", "NO_SIGNAL")),
+                        "reason": str(evaluated.get("reason", "NO_SIGNAL")),
+                        "signal": dict(evaluated.get("signal") or {}),
+                    }
+                    if isinstance(evaluated.get("plan"), dict):
+                        out["plan"] = dict(evaluated.get("plan"))
+                    if "rr" in evaluated:
+                        out["rr"] = evaluated.get("rr")
+                    if "min_rr" in evaluated:
+                        out["min_rr"] = evaluated.get("min_rr")
+                    return out
+                continue
+            scan_notes.append(
+                {
+                    "symbol": scan_symbol,
+                    "action": "OPENABLE",
+                    "reason": "PASS",
+                    "score": float(evaluated.get("signal", {}).get("score", 0.0) or 0.0),
+                }
             )
-            await _auto_update_config(user_id, cfg_id, {**cfg, "last_run_ms": now_ms})
-            out = {"ok": True, "action": "NO_SIGNAL", "reason": "SIGNAL_SCORE_LOW", "signal": signal_info}
-            if isinstance(preview_plan, dict):
-                out["plan"] = preview_plan
-            return out
+            if picked is None or float(evaluated.get("rank_score", 0.0) or 0.0) > float(picked.get("rank_score", 0.0) or 0.0):
+                picked = evaluated
 
-        if trade_side not in {"BUY", "SELL"}:
-            preview_plan = _auto_plan_payload_for_side(
-                _auto_pick_preview_side(decision.get("side", ""), "BUY" if bool(swing_up) else "SELL")
-            )
-            await _auto_update_config(user_id, cfg_id, {**cfg, "last_run_ms": now_ms})
-            out = {
-                "ok": True,
-                "action": "NO_SIGNAL",
-                "reason": "SPOT_SELL_BLOCKED" if spot_sell_blocked else "SIGNAL_SIDE_WAIT",
-                "signal": signal_info,
-            }
-            if isinstance(preview_plan, dict):
-                out["plan"] = preview_plan
-            return out
-
-        if (trade_side == "BUY") and (not bool(swing_up)) and (not reversal_ready):
-            preview_plan = _auto_plan_payload_for_side("BUY")
-            await _auto_update_config(user_id, cfg_id, {**cfg, "last_run_ms": now_ms})
-            out = {"ok": True, "action": "NO_SIGNAL", "reason": "REVERSAL_NOT_READY", "signal": signal_info}
-            if isinstance(preview_plan, dict):
-                out["plan"] = preview_plan
-            return out
-
-        plan = _auto_build_fib_trade_plan(
-            side=trade_side,
-            swing=swing,
-            close=close,
-            atr14=atr14,
-            mode=mode,
-        )
-        if not isinstance(plan, dict):
-            await _auto_update_config(user_id, cfg_id, {**cfg, "last_run_ms": now_ms})
-            return {"ok": True, "action": "NO_SIGNAL", "reason": "INVALID_PLAN", "signal": signal_info}
-
-        entry_price = float(plan["entry_price"])
-        entry_lo = float(plan.get("entry_lo", entry_price))
-        entry_hi = float(plan.get("entry_hi", entry_price))
-        stop_price = float(plan["stop_price"])
-
-        # 현재가가 이미 손절 무효 영역에 있으면 해당 플랜은 즉시 폐기한다.
-        if _auto_plan_invalidated(side=trade_side, stop_price=stop_price, price_now=price_now):
+        if picked is None:
             await _auto_update_config(user_id, cfg_id, {**cfg, "last_run_ms": now_ms})
             return {
                 "ok": True,
                 "action": "NO_SIGNAL",
-                "reason": "PLAN_INVALIDATED",
-                "signal": signal_info,
+                "reason": "SCAN_NO_CANDIDATE" if cfg_symbol == "ALL" else "NO_SIGNAL",
+                "scan": scan_notes[:8],
             }
 
-        if _auto_zone_break_invalidated(side=trade_side, entry_lo=entry_lo, entry_hi=entry_hi, price_now=price_now):
+        symbol = str(picked.get("symbol", cfg_symbol)).upper()
+        df = picked.get("df")
+        if not isinstance(df, pd.DataFrame):
             await _auto_update_config(user_id, cfg_id, {**cfg, "last_run_ms": now_ms})
-            return {
-                "ok": True,
-                "action": "NO_SIGNAL",
-                "reason": "ENTRY_ZONE_BREAK",
-                "signal": signal_info,
-                "plan": {
-                    "side": trade_side,
-                    "entry_price": round(float(plan["entry_price"]), 8),
-                    "entry_lo": round(entry_lo, 8),
-                    "entry_hi": round(entry_hi, 8),
-                    "stop_price": round(float(plan["stop_price"]), 8),
-                    "tp1_price": round(float(plan["tp1_price"]), 8),
-                    "tp2_price": round(float(plan["tp2_price"]), 8),
-                },
-            }
-
-        if _auto_chase_exceeded(side=trade_side, entry_lo=entry_lo, entry_hi=entry_hi, price_now=price_now):
-            await _auto_update_config(user_id, cfg_id, {**cfg, "last_run_ms": now_ms})
-            return {
-                "ok": True,
-                "action": "NO_SIGNAL",
-                "reason": "ENTRY_CHASE_LIMIT",
-                "signal": signal_info,
-                "plan": {
-                    "side": trade_side,
-                    "entry_price": round(float(plan["entry_price"]), 8),
-                    "entry_lo": round(entry_lo, 8),
-                    "entry_hi": round(entry_hi, 8),
-                    "stop_price": round(float(plan["stop_price"]), 8),
-                    "tp1_price": round(float(plan["tp1_price"]), 8),
-                    "tp2_price": round(float(plan["tp2_price"]), 8),
-                },
-            }
-
-        rr_entry = _auto_plan_rr(
-            side=trade_side,
-            entry_price=price_now if price_now > 0 else entry_price,
-            stop_price=stop_price,
-            tp1_price=float(plan["tp1_price"]),
-        )
-        if rr_entry + 1e-12 < float(_AUTO_MIN_ENTRY_RR):
-            await _auto_update_config(user_id, cfg_id, {**cfg, "last_run_ms": now_ms})
-            return {
-                "ok": True,
-                "action": "NO_SIGNAL",
-                "reason": "RR_TOO_LOW",
-                "signal": signal_info,
-                "plan": {
-                    "side": trade_side,
-                    "entry_price": round(float(plan["entry_price"]), 8),
-                    "entry_lo": round(entry_lo, 8),
-                    "entry_hi": round(entry_hi, 8),
-                    "stop_price": round(float(plan["stop_price"]), 8),
-                    "tp1_price": round(float(plan["tp1_price"]), 8),
-                    "tp2_price": round(float(plan["tp2_price"]), 8),
-                },
-                "rr": round(float(rr_entry), 6),
-                "min_rr": round(float(_AUTO_MIN_ENTRY_RR), 6),
-            }
-
-        entry_touched = _auto_plan_is_touched(plan, trade_side)
-        if not entry_touched:
-            await _auto_update_config(user_id, cfg_id, {**cfg, "last_run_ms": now_ms})
-            return {
-                "ok": True,
-                "action": "WAIT_FIB_ENTRY",
-                "signal": signal_info,
-                "plan": {
-                    "side": trade_side,
-                    "entry_price": round(float(plan["entry_price"]), 8),
-                    "entry_lo": round(entry_lo, 8),
-                    "entry_hi": round(entry_hi, 8),
-                    "stop_price": round(float(plan["stop_price"]), 8),
-                    "tp1_price": round(float(plan["tp1_price"]), 8),
-                    "tp2_price": round(float(plan["tp2_price"]), 8),
-                },
-        }
+            return {"ok": True, "action": "NO_SIGNAL", "reason": "DF_MISSING"}
+        decision = dict(picked.get("decision") or {})
+        signal_info = dict(picked.get("signal") or {})
+        signal_info["symbol"] = symbol
+        if cfg_symbol == "ALL":
+            signal_info["scan_size"] = float(len(scan_symbols))
+        plan = dict(picked.get("plan") or {})
+        trade_side = str(picked.get("trade_side", "WAIT")).upper()
+        buy_pct = float(picked.get("buy_pct", 0.0) or 0.0)
+        sell_pct = float(picked.get("sell_pct", 0.0) or 0.0)
+        confidence = float(picked.get("confidence", 0.0) or 0.0)
+        regime_name = str(picked.get("regime", "") or "")
+        swing = dict(picked.get("swing") or {})
+        swing_up = bool(picked.get("swing_up"))
+        price_now = float(picked.get("price_now", 0.0) or 0.0)
+        entry_price = float(picked.get("entry_price", 0.0) or 0.0)
+        entry_lo = float(picked.get("entry_lo", entry_price) or entry_price)
+        entry_hi = float(picked.get("entry_hi", entry_price) or entry_price)
 
         tp_cfg_pct = float(cfg.get("take_profit_pct", 0.0) or 0.0) / 100.0
         sl_cfg_pct = float(cfg.get("stop_loss_pct", 0.0) or 0.0) / 100.0
         qty_basis_price = float(price_now if price_now > 0 else entry_price)
-        qty = order_size_usdt / max(1e-12, qty_basis_price)
+        leverage_for_qty = float(futures_leverage if market == "futures" else 1.0)
+        qty = (order_size_usdt * leverage_for_qty) / max(1e-12, qty_basis_price)
         entry_exec = entry_price
         qty_exec = qty
         entry_exec_info: Dict[str, Any] = {}
@@ -5762,6 +6115,14 @@ async def _auto_trade_tick_core(
         )
         if _AUTO_LIVE_TRADING_ENABLED:
             try:
+                leverage_applied: Dict[str, Any] = {}
+                if market == "futures":
+                    leverage_applied = await _auto_set_futures_leverage(
+                        symbol=symbol,
+                        leverage=futures_leverage,
+                        api_key=api_key,
+                        api_secret=api_secret,
+                    )
                 fill = await _auto_place_market_order(
                     market=market,
                     symbol=symbol,
@@ -5784,6 +6145,7 @@ async def _auto_trade_tick_core(
                     "ts_ms": now_ms,
                     "source": str(source),
                     "client_order_id": entry_client_id,
+                    "futures_leverage": int(leverage_applied.get("leverage", futures_leverage) or futures_leverage),
                 }
                 if qty_exec <= 0 or entry_exec <= 0:
                     await _auto_audit_log(
@@ -5814,7 +6176,12 @@ async def _auto_trade_tick_core(
                     price=entry_exec,
                     order_id=str(fill.get("order_id", "") or ""),
                     client_order_id=entry_client_id,
-                    payload={"requested_qty": round(qty, 8), "source": source},
+                    payload={
+                        "requested_qty": round(qty, 8),
+                        "source": source,
+                        "order_margin_usdt": round(order_size_usdt, 6),
+                        "futures_leverage": int(futures_leverage),
+                    },
                 )
             except HTTPException as e:
                 await _auto_audit_log(
@@ -5872,9 +6239,12 @@ async def _auto_trade_tick_core(
             "buy_pct": round(buy_pct, 4),
             "sell_pct": round(sell_pct, 4),
             "confidence": round(confidence, 6),
-            "regime": str(regime.regime),
+            "regime": str(regime_name),
             "decision_side": str(decision.get("side", "")),
             "decision_diff": round(float(decision.get("diff", 0.0)), 6),
+            "futures_leverage": int(futures_leverage if market == "futures" else 1),
+            "whale_score": round(float(signal_info.get("whale_score", 0.0) or 0.0), 4),
+            "whale_label": str(signal_info.get("whale_label", "")),
             "tp_mode": "manual_pct" if tp_cfg_pct > 0 else "fib_auto",
             "tp_input_pct": round(tp_cfg_pct * 100.0, 6),
             "sl_mode": "manual_pct" if sl_cfg_pct > 0 else "fib_auto",
@@ -5909,7 +6279,7 @@ async def _auto_trade_tick_core(
             "signal_buy_pct": buy_pct,
             "signal_sell_pct": sell_pct,
             "signal_confidence": round(confidence, 6),
-            "decision_diff": round(float(decision["diff"]), 6),
+            "decision_diff": round(float(decision.get("diff", 0.0) or 0.0), 6),
             "reason": _auto_reason_pack(reason_state),
         }
 
@@ -6177,12 +6547,15 @@ async def _auto_trade_tick_core(
             "action": "OPENED",
             "record": rec,
             "signal": {
+                "symbol": symbol,
                 "buy_pct": buy_pct,
                 "sell_pct": sell_pct,
                 "confidence": confidence,
-                "regime": regime.regime,
+                "regime": regime_name,
                 "side": trade_side,
-                "diff": decision["diff"],
+                "diff": float(decision.get("diff", 0.0) or 0.0),
+                "whale_score": float(signal_info.get("whale_score", 0.0) or 0.0),
+                "whale_label": str(signal_info.get("whale_label", "")),
             },
             "plan": {
                 "entry_price": round(entry_exec, 8),
@@ -6550,6 +6923,7 @@ async def api_analysis(
             "avwap": avwap_levels,
             "volume_profile": vp,
         },
+        "whale_sentiment": whale_sentiment,
         "indicators": {
             "ema20": ind.ema20,
             "ema50": ind.ema50,
@@ -6612,6 +6986,7 @@ async def api_analysis_trendy(
     prev_close = float(df["close"].iloc[-2])
     regime = classify_regime(df)
     avwap_levels, vp = _build_levels(df)
+    whale_sentiment = await _auto_fetch_whale_sentiment(symbol=symbol.upper())
     score = score_signal_trendy(
         close=close,
         prev_close=prev_close,
@@ -6655,6 +7030,7 @@ async def api_analysis_trendy(
             "avwap": avwap_levels,
             "volume_profile": vp,
         },
+        "whale_sentiment": whale_sentiment,
         "indicators": {
             "ema20": ind.ema20,
             "ema50": ind.ema50,
@@ -6718,6 +7094,7 @@ async def api_analysis_trendy_mtf(
     tf_buy_prob: Dict[str, float] = {}
     tf_regimes: Dict[str, str] = {}
     tf_weight = {"4h": 0.20, "1h": 0.35, "5m": 0.45}
+    whale_sentiment = await _auto_fetch_whale_sentiment(symbol=symbol.upper())
 
     for tf in ("4h", "1h", "5m"):
         df = dfs[tf]
@@ -6819,6 +7196,7 @@ async def api_analysis_trendy_mtf(
         "calibration_method": calibration_method,
         "tf_weights": tf_weight,
         "tf": tf_result,
+        "whale_sentiment": whale_sentiment,
         "meta": {
             "mtf_rule": "4h filter + 1h setup + 5m trigger (weighted blend)",
             "agreement_shift": round(agreement_shift, 6),
