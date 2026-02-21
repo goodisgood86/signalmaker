@@ -288,15 +288,15 @@ _AUTO_SPOT_PRICE_CACHE_TTL_S = max(
 _AUTO_SPOT_PRICE_CACHE: Dict[str, Any] = {"ts": 0.0, "map": {}}
 _AUTO_ENTRY_CHASE_MAX_PCT = max(
     0.0,
-    min(0.05, float(str(os.getenv("AUTO_ENTRY_CHASE_MAX_PCT", "0.008")) or "0.008")),
+    min(0.05, float(str(os.getenv("AUTO_ENTRY_CHASE_MAX_PCT", "0.012")) or "0.012")),
 )
 _AUTO_ENTRY_ZONE_BREAK_MAX_PCT = max(
     0.0,
-    min(0.08, float(str(os.getenv("AUTO_ENTRY_ZONE_BREAK_MAX_PCT", "0.01")) or "0.01")),
+    min(0.08, float(str(os.getenv("AUTO_ENTRY_ZONE_BREAK_MAX_PCT", "0.015")) or "0.015")),
 )
-_AUTO_MIN_ENTRY_RR = max(0.2, min(3.0, float(str(os.getenv("AUTO_MIN_ENTRY_RR", "0.9")) or "0.9")))
-_AUTO_SIGNAL_SCORE_BASE = max(30.0, min(95.0, float(str(os.getenv("AUTO_SIGNAL_SCORE_BASE", "55")) or "55")))
-_AUTO_SIGNAL_SCORE_AGGR = max(20.0, min(90.0, float(str(os.getenv("AUTO_SIGNAL_SCORE_AGGR", "48")) or "48")))
+_AUTO_MIN_ENTRY_RR = max(0.2, min(3.0, float(str(os.getenv("AUTO_MIN_ENTRY_RR", "0.7")) or "0.7")))
+_AUTO_SIGNAL_SCORE_BASE = max(30.0, min(95.0, float(str(os.getenv("AUTO_SIGNAL_SCORE_BASE", "52")) or "52")))
+_AUTO_SIGNAL_SCORE_AGGR = max(20.0, min(90.0, float(str(os.getenv("AUTO_SIGNAL_SCORE_AGGR", "45")) or "45")))
 _AUTO_REVERSAL_CONF_MIN = max(0.1, min(0.9, float(str(os.getenv("AUTO_REVERSAL_CONF_MIN", "0.28")) or "0.28")))
 _AUTO_FLOW_SCORE_WEIGHT = max(0.2, min(0.3, float(str(os.getenv("AUTO_FLOW_SCORE_WEIGHT", "0.25")) or "0.25")))
 _AUTO_SIGNAL_SCORE_SYMBOL_BIAS: Dict[str, float] = {
@@ -313,9 +313,9 @@ _AUTO_SIGNAL_SCORE_REGIME_BIAS: Dict[str, float] = {
     "HIGH_VOL": -1.5,
     "TREND": 3.0,
 }
-_AUTO_TREND_GATE_MIN_DIFF = max(0.0, min(40.0, float(str(os.getenv("AUTO_TREND_GATE_MIN_DIFF", "10")) or "10")))
-_AUTO_TREND_GATE_MIN_CONF = max(0.0, min(1.0, float(str(os.getenv("AUTO_TREND_GATE_MIN_CONF", "0.34")) or "0.34")))
-_AUTO_TREND_GATE_BYPASS_DIFF = max(0.0, min(50.0, float(str(os.getenv("AUTO_TREND_GATE_BYPASS_DIFF", "15")) or "15")))
+_AUTO_TREND_GATE_MIN_DIFF = max(0.0, min(40.0, float(str(os.getenv("AUTO_TREND_GATE_MIN_DIFF", "7")) or "7")))
+_AUTO_TREND_GATE_MIN_CONF = max(0.0, min(1.0, float(str(os.getenv("AUTO_TREND_GATE_MIN_CONF", "0.28")) or "0.28")))
+_AUTO_TREND_GATE_BYPASS_DIFF = max(0.0, min(50.0, float(str(os.getenv("AUTO_TREND_GATE_BYPASS_DIFF", "12")) or "12")))
 _AUTO_TP1_BE_ENABLED = str(os.getenv("AUTO_TP1_BE_ENABLED", "1")).strip().lower() not in {"0", "false", "no", "off"}
 _AUTO_TP1_BE_BUFFER_PCT = max(
     0.0,
