@@ -927,7 +927,7 @@
         <div class="cfg-field">
           <div class="cfg-label">거래 마켓</div>
           <select id="cfgMarketSelect">
-            <option value="spot">spot (롱 전용)</option>
+            <option value="spot">spot</option>
             <option value="futures">futures (롱/숏)</option>
           </select>
         </div>
@@ -1124,7 +1124,6 @@
           <div class="logic-block">
             <div class="logic-k">매수/매도 진입 조건</div>
             <div class="logic-v">기본모드/공격모드 공통: 확률·신뢰도·레짐·스윙·거래량 + 플로우 점수(taker ratio/OI 변화/top-trader ratio/funding)를 합산한 신호점수를 계산합니다.
-플로우 점수 가중치는 20~30%(기본 25%) 범위로 적용됩니다.
 기본모드 기준점수: 55점, 공격모드 기준점수: 48점.
 공격모드는 기준점수만 완화하며, 안전필터(담보/일손실/손절무효)는 동일하게 유지합니다.
 스윙 역방향 신호는 차단하지 않고 점수 페널티로만 반영합니다.

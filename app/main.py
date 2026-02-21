@@ -7311,31 +7311,20 @@ async def api_pass_check_db(
         progress_row = await _pc_get_progress(symbol_u, market_u, interval_u, period)
     except HTTPException:
         progress_row = None
-    try:
-        baseline = await _pc_get_entry_baseline_counts(symbol_u, market_u, interval_u)
-    except HTTPException:
-        baseline = None
     if summary:
         summary_pass = int(summary.get("pass_count", 0) or 0)
         summary_exec = int(summary.get("executed_count", 0) or 0)
         summary_no_entry = int(summary.get("no_entry_count", 0) or 0)
-        if baseline and int(baseline.get("pass_count", 0) or 0) > 0:
-            pass_count = int(baseline.get("pass_count", 0) or 0)
-            executed_count = int(baseline.get("executed_count", 0) or 0)
-            no_entry_count = int(baseline.get("no_entry_count", 0) or 0)
-            first_signal_time_ms = int(baseline.get("first_signal_time_ms", 0) or 0)
-            latest_signal_time_ms = int(baseline.get("latest_signal_time_ms", 0) or 0)
-        else:
-            pass_count = summary_pass
-            executed_count = summary_exec
-            no_entry_count = summary_no_entry
-            first_signal_time_ms = 0
-            if pass_count > 0:
-                try:
-                    first_signal_time_ms = await _pc_get_first_signal_time_ms(symbol_u, market_u, interval_u, period)
-                except HTTPException:
-                    first_signal_time_ms = 0
-            latest_signal_time_ms = int(summary.get("latest_signal_time_ms", 0) or 0)
+        pass_count = summary_pass
+        executed_count = summary_exec
+        no_entry_count = summary_no_entry
+        first_signal_time_ms = 0
+        if pass_count > 0:
+            try:
+                first_signal_time_ms = await _pc_get_first_signal_time_ms(symbol_u, market_u, interval_u, period)
+            except HTTPException:
+                first_signal_time_ms = 0
+        latest_signal_time_ms = int(summary.get("latest_signal_time_ms", 0) or 0)
         if latest_signal_time_ms <= 0 and isinstance(progress_row, dict):
             latest_signal_time_ms = int(progress_row.get("last_signal_time_ms", 0) or 0)
         # 무신호 구간에서도 검증 범위를 표기할 수 있도록 최초값을 period 기준으로 보정한다.
@@ -7388,32 +7377,20 @@ async def api_pass_check_db(
     no_hits = sum(1 for e in executed if str(e.get("result", "")).upper() == "NO_HIT")
     no_entry = sum(1 for e in events if not bool(e.get("executed")))
     resolved = tp_hits + sl_hits
-    base_pass = pass_cnt
-    base_exec = executed_cnt
-    base_no_entry = no_entry
-    base_first_signal = int(events[-1]["signal_time_ms"]) if events else 0
-    base_latest_signal = int(events[0]["signal_time_ms"]) if events else 0
-    if baseline and int(baseline.get("pass_count", 0) or 0) > 0:
-        base_pass = int(baseline.get("pass_count", 0) or 0)
-        base_exec = int(baseline.get("executed_count", 0) or 0)
-        base_no_entry = int(baseline.get("no_entry_count", 0) or 0)
-        base_first_signal = int(baseline.get("first_signal_time_ms", 0) or 0)
-        base_latest_signal = int(baseline.get("latest_signal_time_ms", 0) or 0)
-
     payload = _build_pass_check_payload(
         symbol=symbol_u,
         market=market_u,
         interval=interval_u,
         period=period,
-        pass_count=base_pass,
-        executed_count=base_exec,
-        no_entry_count=base_no_entry,
+        pass_count=pass_cnt,
+        executed_count=executed_cnt,
+        no_entry_count=no_entry,
         tp1_hit_count=tp_hits,
         sl_hit_count=sl_hits,
         no_hit_count=no_hits,
         resolved_count=resolved,
-        first_signal_time_ms=base_first_signal,
-        latest_signal_time_ms=base_latest_signal,
+        first_signal_time_ms=int(events[-1]["signal_time_ms"]) if events else 0,
+        latest_signal_time_ms=int(events[0]["signal_time_ms"]) if events else 0,
         updated_ms=int(time() * 1000),
         source="db_events_fallback",
         flow_score=ref_flow_score,

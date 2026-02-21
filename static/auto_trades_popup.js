@@ -279,6 +279,7 @@ function applyMarketSelection(market) {
   if (cfgFuturesLeverageEl) {
     cfgFuturesLeverageEl.disabled = !isFutures;
     if (isFutures) normalizeFuturesLeverageInput({ allowEmpty: false, fallback: 3 });
+    else cfgFuturesLeverageEl.value = "";
   }
   if (cfgLeverageHintEl) {
     cfgLeverageHintEl.textContent = isFutures
@@ -647,7 +648,7 @@ function applyConfig(cfg) {
   if (cfgOrderSizeEl) cfgOrderSizeEl.value = String(Number(cfg.order_size_usdt || 30));
   if (cfgFuturesLeverageEl) {
     const lev = Math.max(1, Math.min(50, Math.round(Number(cfg.futures_leverage || 3))));
-    cfgFuturesLeverageEl.value = String(lev);
+    cfgFuturesLeverageEl.value = String(cfg.market || "spot").toLowerCase() === "futures" ? String(lev) : "";
   }
   if (cfgDailyLossEl) cfgDailyLossEl.value = String(Number(cfg.daily_max_loss_usdt || 0));
   const tpPct = Number(cfg.take_profit_pct || 0);
@@ -670,7 +671,8 @@ function applyConfig(cfg) {
 function collectConfigPayload() {
   const symbol = "ALL";
   const market = normalizeMarketValue(cfgMarketSelectEl?.value || cfgMarketEl?.value || "spot");
-  const futuresLeverage = Math.max(1, Math.min(50, Math.round(Number(cfgFuturesLeverageEl?.value || 3))));
+  const futuresLeverage =
+    market === "futures" ? Math.max(1, Math.min(50, Math.round(Number(cfgFuturesLeverageEl?.value || 3)))) : 1;
   const tpMode = String(cfgTpModeEl?.value || "auto").toLowerCase();
   const slMode = String(cfgSlModeEl?.value || "auto").toLowerCase();
   const tpInput = Number(cfgTpPctEl?.value || 0);

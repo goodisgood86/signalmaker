@@ -2246,7 +2246,7 @@ function renderActionSummary(analysis, fibPlan) {
       `구성: 우위 ${signalScore.edge.toFixed(1)} · 신뢰 ${signalScore.conf.toFixed(1)} · 레짐 ${signalScore.regime.toFixed(
         1
       )} · 방향 ${signalScore.side.toFixed(1)} · 피보 ${signalScore.fib.toFixed(1)} · 모멘텀 ${signalScore.momentum.toFixed(1)} · 플로우 ${signalScore.flow.toFixed(1)}`,
-      `고래/플로우: ${whaleLabel}${Number.isFinite(flowScore) ? ` (${flowScore >= 0 ? "+" : ""}${flowScore.toFixed(2)})` : ""} · 가중치 ${(flowWeight * 100).toFixed(0)}%`,
+      `고래/플로우: ${whaleLabel}${Number.isFinite(flowScore) ? ` (${flowScore >= 0 ? "+" : ""}${flowScore.toFixed(2)})` : ""}`,
       "규칙: 공격모드는 기준점수만 완화, 안전필터(담보/일손실/손절무효)는 동일 적용",
     ];
     if (!passSignal) lines.push("미통과: 신호 점수 부족");
@@ -2412,7 +2412,7 @@ function renderActionSummary(analysis, fibPlan) {
       `- 신호점수 ${signalScore.total.toFixed(1)}점 (기본 ${scoreThresholdBase} / 공격 ${scoreThresholdAggressive})\n` +
       `- 점수구성 우위 ${signalScore.edge.toFixed(1)} / 신뢰 ${signalScore.conf.toFixed(1)} / 레짐 ${signalScore.regime.toFixed(
         1
-      )} / 방향 ${signalScore.side.toFixed(1)} / 피보 ${signalScore.fib.toFixed(1)} / 모멘텀 ${signalScore.momentum.toFixed(1)} / 플로우 ${signalScore.flow.toFixed(1)}(가중 ${(flowWeight * 100).toFixed(0)}%)\n` +
+      )} / 방향 ${signalScore.side.toFixed(1)} / 피보 ${signalScore.fib.toFixed(1)} / 모멘텀 ${signalScore.momentum.toFixed(1)} / 플로우 ${signalScore.flow.toFixed(1)}\n` +
       `- 셋업 ${setupTxt}\n\n` +
       `[왜 이렇게 나왔나]\n` +
       `- 주요 반영값: ${topTxt}\n` +
@@ -2962,10 +2962,7 @@ async function loadPassCheck(symbol, market, analysisMode, analysisInterval) {
     const startMs = firstSignalMs > 0 ? firstSignalMs : 0;
     const rangeText = startMs > 0 && endMs > 0 ? `${fmtYmd(startMs)} ~ ${fmtYmd(endMs)}` : bars > 0 ? `최근 ${bars}봉 (${interval})` : "-";
     const periodLabel = periodCfg.period === "24h" ? "24시간" : periodCfg.period === "7d" ? "7일" : "3일";
-    const modeNote =
-      analysisMode === "mtf"
-        ? `MTF는 5m 기준 · 진입 후 ${periodLabel} 내 손절 없이 익절 달성만 집계`
-        : `${interval} 기준 · 진입 후 ${periodLabel} 내 손절 없이 익절 달성만 집계`;
+    const modeNote = analysisMode === "mtf" ? `MTF(5m) · ${periodLabel} 내 TP1 달성 집계` : `${interval} · ${periodLabel} 내 TP1 달성 집계`;
     const nextPayload = {
       modeNote,
       barsText: rangeText,
@@ -2974,7 +2971,7 @@ async function loadPassCheck(symbol, market, analysisMode, analysisInterval) {
       hitRateText: `${hitCnt}회 (${hitRate.toFixed(1)}%)`,
     };
     if (Number(data?.pass_count || 0) <= 0) {
-      nextPayload.modeNote = `${modeNote} · PASS 사례 없음`;
+      nextPayload.modeNote = `${modeNote} · PASS 0건`;
       nextPayload.passesText = "0회";
       nextPayload.hitRate = 0;
       nextPayload.hitRateText = "0회 (0.0%)";
