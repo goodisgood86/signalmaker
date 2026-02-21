@@ -6357,7 +6357,7 @@ async def _auto_trade_tick_core(
                 "GET",
                 "/rest/v1/auto_trade_records",
                 params={
-                    "select": "id,status,opened_ms",
+                    "select": "id,status,opened_ms,symbol,market",
                     "user_id": f"eq.{user_id}",
                     "status": "eq.OPEN",
                     "order": "opened_ms.desc",
@@ -6370,6 +6370,17 @@ async def _auto_trade_tick_core(
             raise
         open_rows = rows if isinstance(rows, list) else []
         open_count = len(open_rows)
+        open_symbols_by_market: Dict[str, set[str]] = {}
+        for r in open_rows:
+            sym_v = str(r.get("symbol", "")).upper().strip()
+            mkt_v = str(r.get("market", "")).lower().strip()
+            if not sym_v or not mkt_v:
+                continue
+            bucket = open_symbols_by_market.get(mkt_v)
+            if bucket is None:
+                bucket = set()
+                open_symbols_by_market[mkt_v] = bucket
+            bucket.add(sym_v)
         max_open = int(cfg.get("max_open_positions", 1) or 1)
         if open_count >= max_open:
             await _auto_update_config(user_id, cfg_id, {**cfg, "last_run_ms": now_ms})
@@ -6415,6 +6426,7 @@ async def _auto_trade_tick_core(
 
         symbol = str(cfg.get("symbol", "BTCUSDT")).upper()
         market = str(cfg.get("market", "spot")).lower()
+        open_symbol_set: set[str] = set(open_symbols_by_market.get(market, set()))
         interval = str(cfg.get("interval", "5m"))
         mode = str(cfg.get("mode", "balanced")).lower()
         if mode not in _AUTO_ALLOWED_MODES:
@@ -6454,6 +6466,18 @@ async def _auto_trade_tick_core(
         picked: Dict[str, Any] | None = None
         scan_notes: List[Dict[str, Any]] = []
         for scan_symbol in scan_symbols:
+            scan_symbol_u = str(scan_symbol or "").upper().strip()
+            if scan_symbol_u and scan_symbol_u in open_symbol_set:
+                scan_notes.append({"symbol": scan_symbol_u, "action": "SKIP_SYMBOL_OPEN", "reason": "ALREADY_OPEN"})
+                if cfg_symbol != "ALL":
+                    await _auto_update_config(user_id, cfg_id, {**cfg, "last_run_ms": now_ms})
+                    return {
+                        "ok": True,
+                        "action": "SKIP_SYMBOL_OPEN",
+                        "reason": "ALREADY_OPEN",
+                        "symbol": scan_symbol_u,
+                    }
+                continue
             try:
                 evaluated = await _auto_eval_entry_candidate(
                     symbol=scan_symbol,
