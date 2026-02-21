@@ -1838,7 +1838,17 @@ function hasEntryReaction(side, entryLo, entryHi, klines) {
   return false;
 }
 
-function calcSignalScore({ rawDiff, conf, regime, side, lowVolumeBlock, swingConflict, reversalReady, whaleScore = 0 }) {
+function calcSignalScore({
+  rawDiff,
+  conf,
+  regime,
+  side,
+  lowVolumeBlock,
+  swingConflict,
+  reversalReady,
+  whaleScore = 0,
+  flowWeight = 0.25,
+}) {
   const edge = Math.abs(Number(rawDiff) || 0);
   const edgeScore = Math.max(0, Math.min(30, (edge / 20) * 30));
   const c = Number(conf);
@@ -1850,19 +1860,30 @@ function calcSignalScore({ rawDiff, conf, regime, side, lowVolumeBlock, swingCon
   const fibScore = reversalReady ? 10 : swingConflict ? 0 : 4;
   const momentumScore = lowVolumeBlock ? 1 : 5;
   const whale = Math.max(-1, Math.min(1, Number(whaleScore) || 0));
-  let whaleFlowScore = 0;
-  if (s === "BUY") whaleFlowScore = Math.max(0, whale) * 10;
-  else if (s === "SELL") whaleFlowScore = Math.max(0, -whale) * 10;
-  const total = edgeScore + confScore + regimeScore + sideScore + fibScore + momentumScore + whaleFlowScore;
+  const wRaw = Number(flowWeight);
+  const w = Number.isFinite(wRaw) ? Math.max(0.2, Math.min(0.3, wRaw)) : 0.25;
+  let flowComponent = 0;
+  if (s === "BUY") flowComponent = Math.max(0, whale) * 100;
+  else if (s === "SELL") flowComponent = Math.max(0, -whale) * 100;
+  const baseTotal = Math.max(0, Math.min(100, edgeScore + confScore + regimeScore + sideScore + fibScore + momentumScore));
+  const baseContrib = baseTotal * (1 - w);
+  const flowContrib = flowComponent * w;
+  const total = baseContrib + flowContrib;
   return {
     total: Math.max(0, Math.min(100, total)),
+    base_total: baseTotal,
+    base_contrib: baseContrib,
+    flow_contrib: flowContrib,
+    flow_component: flowComponent,
+    flow_weight: w,
     edge: edgeScore,
     conf: confScore,
     regime: regimeScore,
     side: sideScore,
     fib: fibScore,
     momentum: momentumScore,
-    whale: whaleFlowScore,
+    whale: flowContrib,
+    flow: flowContrib,
   };
 }
 
@@ -1875,6 +1896,10 @@ function renderActionSummary(analysis, fibPlan) {
   const regime = String(analysis?.regime || "").toUpperCase();
   const whaleObj = analysis?.whale_sentiment || {};
   const whaleScore = Number(whaleObj?.score);
+  const flowScoreRaw = Number(whaleObj?.flow_score);
+  const flowScore = Number.isFinite(flowScoreRaw) ? flowScoreRaw : whaleScore;
+  const flowWeightRaw = Number(whaleObj?.flow_weight);
+  const flowWeight = Number.isFinite(flowWeightRaw) ? Math.max(0.2, Math.min(0.3, flowWeightRaw)) : 0.25;
   const whaleLabel = String(whaleObj?.label || "중립");
   const close = Number(analysis?.close);
   const rawDiff = buy - sell;
@@ -1975,7 +2000,7 @@ function renderActionSummary(analysis, fibPlan) {
   const regimeTxt =
     regime === "TREND" ? "추세장" : regime === "RANGE" ? "횡보장" : regime === "HIGH_VOL" ? "고변동장" : "중립장";
   if (whaleStateEl) {
-    if (Number.isFinite(whaleScore)) whaleStateEl.textContent = `${whaleLabel}\n(${whaleScore >= 0 ? "+" : ""}${whaleScore.toFixed(2)})`;
+    if (Number.isFinite(flowScore)) whaleStateEl.textContent = `${whaleLabel}\n(${flowScore >= 0 ? "+" : ""}${flowScore.toFixed(2)})`;
     else whaleStateEl.textContent = whaleLabel || "중립";
   }
   let verdict = "그래서 관망이 유리합니다.";
@@ -2192,7 +2217,8 @@ function renderActionSummary(analysis, fibPlan) {
     lowVolumeBlock,
     swingConflict: scoreSwingConflict,
     reversalReady,
-    whaleScore,
+    whaleScore: flowScore,
+    flowWeight,
   });
   const passSignalBase = signalScore.total >= scoreThresholdBase;
   const passSignalAgg = signalScore.total >= scoreThresholdAggressive;
@@ -2216,8 +2242,8 @@ function renderActionSummary(analysis, fibPlan) {
         `점수: ${signalScore.total.toFixed(1)} / 100 (기본 ${scoreThresholdBase}, 공격 ${scoreThresholdAggressive})`,
         `구성: 우위 ${signalScore.edge.toFixed(1)} · 신뢰 ${signalScore.conf.toFixed(1)} · 레짐 ${signalScore.regime.toFixed(
           1
-        )} · 방향 ${signalScore.side.toFixed(1)} · 피보 ${signalScore.fib.toFixed(1)} · 모멘텀 ${signalScore.momentum.toFixed(1)} · 고래 ${signalScore.whale.toFixed(1)}`,
-        `고래심리: ${whaleLabel}${Number.isFinite(whaleScore) ? ` (${whaleScore >= 0 ? "+" : ""}${whaleScore.toFixed(2)})` : ""}`,
+        )} · 방향 ${signalScore.side.toFixed(1)} · 피보 ${signalScore.fib.toFixed(1)} · 모멘텀 ${signalScore.momentum.toFixed(1)} · 플로우 ${signalScore.flow.toFixed(1)}`,
+        `고래/플로우: ${whaleLabel}${Number.isFinite(flowScore) ? ` (${flowScore >= 0 ? "+" : ""}${flowScore.toFixed(2)})` : ""} · 가중치 ${(flowWeight * 100).toFixed(0)}%`,
         "규칙: 공격모드는 기준점수만 완화, 안전필터(담보/일손실/손절무효/스팟 숏금지)는 동일 적용",
       ];
       if (!passSignal) lines.push("미통과: 신호 점수 부족");
@@ -2370,11 +2396,11 @@ function renderActionSummary(analysis, fibPlan) {
       }${swingBias.toFixed(2)}%p, 반영차이 ${diff >= 0 ? "+" : ""}${diff.toFixed(2)}%p)\n` +
       `- 신뢰도 ${(conf * 100).toFixed(1)}% (지표 일치도)\n` +
       `- 레짐 ${regimeTxt} (${regime || "-"})\n` +
-      `- 고래심리 ${whaleLabel}${Number.isFinite(whaleScore) ? ` (${whaleScore >= 0 ? "+" : ""}${whaleScore.toFixed(2)})` : ""}\n` +
+      `- 고래심리 ${whaleLabel}${Number.isFinite(flowScore) ? ` (${flowScore >= 0 ? "+" : ""}${flowScore.toFixed(2)})` : ""}\n` +
       `- 신호점수 ${signalScore.total.toFixed(1)}점 (기본 ${scoreThresholdBase} / 공격 ${scoreThresholdAggressive})\n` +
       `- 점수구성 우위 ${signalScore.edge.toFixed(1)} / 신뢰 ${signalScore.conf.toFixed(1)} / 레짐 ${signalScore.regime.toFixed(
         1
-      )} / 방향 ${signalScore.side.toFixed(1)} / 피보 ${signalScore.fib.toFixed(1)} / 모멘텀 ${signalScore.momentum.toFixed(1)} / 고래 ${signalScore.whale.toFixed(1)}\n` +
+      )} / 방향 ${signalScore.side.toFixed(1)} / 피보 ${signalScore.fib.toFixed(1)} / 모멘텀 ${signalScore.momentum.toFixed(1)} / 플로우 ${signalScore.flow.toFixed(1)}(가중 ${(flowWeight * 100).toFixed(0)}%)\n` +
       `- 셋업 ${setupTxt}\n\n` +
       `[왜 이렇게 나왔나]\n` +
       `- 주요 반영값: ${topTxt}\n` +

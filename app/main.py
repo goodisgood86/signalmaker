@@ -296,6 +296,7 @@ _AUTO_MIN_ENTRY_RR = max(0.2, min(3.0, float(str(os.getenv("AUTO_MIN_ENTRY_RR", 
 _AUTO_SIGNAL_SCORE_BASE = max(30.0, min(95.0, float(str(os.getenv("AUTO_SIGNAL_SCORE_BASE", "70")) or "70")))
 _AUTO_SIGNAL_SCORE_AGGR = max(20.0, min(90.0, float(str(os.getenv("AUTO_SIGNAL_SCORE_AGGR", "58")) or "58")))
 _AUTO_REVERSAL_CONF_MIN = max(0.1, min(0.9, float(str(os.getenv("AUTO_REVERSAL_CONF_MIN", "0.28")) or "0.28")))
+_AUTO_FLOW_SCORE_WEIGHT = max(0.2, min(0.3, float(str(os.getenv("AUTO_FLOW_SCORE_WEIGHT", "0.25")) or "0.25")))
 _AUTO_WS_PRICE_ENABLED = str(os.getenv("AUTO_WS_PRICE_ENABLED", "1")).strip().lower() not in {"0", "false", "no", "off"}
 _AUTO_WS_PRICE_MAX_STALE_S = max(
     3.0,
@@ -540,6 +541,8 @@ def _auto_set_runtime_state(*, user_id: int, source: str, result: Any) -> None:
             "reversal_ready",
             "whale_score",
             "whale_label",
+            "flow_score",
+            "flow_weight",
         ):
             if k not in signal:
                 continue
@@ -1496,7 +1499,7 @@ def _calc_pass_check_from_df(
             swing_conflict=score_swing_conflict,
             low_volume_block=low_volume_block,
             reversal_ready=reversal_ready,
-            whale_score=0.0,
+            flow_score=0.0,
         )
         score_threshold = float(_AUTO_SIGNAL_SCORE_BASE)
         pass_signal_score = float(score_pack.get("total", 0.0) or 0.0) >= score_threshold
@@ -2306,7 +2309,8 @@ def _auto_calc_signal_score(
     swing_conflict: bool,
     low_volume_block: bool,
     reversal_ready: bool,
-    whale_score: float = 0.0,
+    flow_score: float = 0.0,
+    flow_weight: float = _AUTO_FLOW_SCORE_WEIGHT,
 ) -> Dict[str, float]:
     edge = abs(float(raw_diff))
     edge_score = max(0.0, min(30.0, (edge / 20.0) * 30.0))
@@ -2317,17 +2321,27 @@ def _auto_calc_signal_score(
     side_score = 15.0 if str(side or "").upper() in {"BUY", "SELL"} else 0.0
     fib_ready_score = 10.0 if bool(reversal_ready) else 4.0 if (not bool(swing_conflict)) else 0.0
     momentum_score = 1.0 if bool(low_volume_block) else 5.0
-    whale_flow_score = _auto_whale_side_bias(whale_score, side) * 10.0
-    total = edge_score + conf_score + regime_score + side_score + fib_ready_score + momentum_score + whale_flow_score
+    base_total = max(0.0, min(100.0, edge_score + conf_score + regime_score + side_score + fib_ready_score + momentum_score))
+    w = _auto_clamp(_auto_to_float(flow_weight, _AUTO_FLOW_SCORE_WEIGHT), 0.2, 0.3)
+    flow_component = _auto_whale_side_bias(flow_score, side) * 100.0
+    base_contrib = base_total * (1.0 - w)
+    flow_contrib = flow_component * w
+    total = base_contrib + flow_contrib
     return {
         "total": max(0.0, min(100.0, total)),
+        "base_total": base_total,
+        "base_contrib": base_contrib,
+        "flow_contrib": flow_contrib,
+        "flow_weight": w,
+        "flow_component": flow_component,
         "edge": edge_score,
         "conf": conf_score,
         "regime": regime_score,
         "side": side_score,
         "fib": fib_ready_score,
         "momentum": momentum_score,
-        "whale": whale_flow_score,
+        "whale": flow_contrib,
+        "flow": flow_contrib,
     }
 
 
@@ -4180,9 +4194,12 @@ async def _auto_fetch_whale_sentiment(*, symbol: str) -> Dict[str, Any]:
     if not sym or not sym.endswith("USDT"):
         return {
             "score": 0.0,
+            "flow_score": 0.0,
+            "flow_weight": round(float(_AUTO_FLOW_SCORE_WEIGHT), 4),
             "label": "중립",
             "taker_ratio": 1.0,
             "long_short_ratio": 1.0,
+            "top_trader_ratio": 1.0,
             "oi_change_pct": 0.0,
             "funding_rate": 0.0,
             "asof_ms": int(time() * 1000),
@@ -4204,9 +4221,10 @@ async def _auto_fetch_whale_sentiment(*, symbol: str) -> Dict[str, Any]:
         except Exception:
             return None
 
-    taker_rows, long_short_rows, oi_rows, funding = await asyncio.gather(
+    taker_rows, long_short_rows, top_rows, oi_rows, funding = await asyncio.gather(
         _safe_public("/futures/data/takerlongshortRatio", {"symbol": sym, "period": "5m", "limit": 12}),
         _safe_public("/futures/data/globalLongShortAccountRatio", {"symbol": sym, "period": "5m", "limit": 12}),
+        _safe_public("/futures/data/topLongShortAccountRatio", {"symbol": sym, "period": "5m", "limit": 12}),
         _safe_public("/futures/data/openInterestHist", {"symbol": sym, "period": "5m", "limit": 12}),
         _safe_public("/fapi/v1/premiumIndex", {"symbol": sym}),
     )
@@ -4217,6 +4235,9 @@ async def _auto_fetch_whale_sentiment(*, symbol: str) -> Dict[str, Any]:
     ls_ratio = 1.0
     if isinstance(long_short_rows, list) and long_short_rows:
         ls_ratio = _auto_to_float(long_short_rows[-1].get("longShortRatio", 1.0), 1.0)
+    top_ratio = 1.0
+    if isinstance(top_rows, list) and top_rows:
+        top_ratio = _auto_to_float(top_rows[-1].get("longShortRatio", 1.0), 1.0)
 
     oi_change_pct = 0.0
     if isinstance(oi_rows, list) and len(oi_rows) >= 2:
@@ -4234,14 +4255,23 @@ async def _auto_fetch_whale_sentiment(*, symbol: str) -> Dict[str, Any]:
 
     taker_bias = _auto_clamp((taker_ratio - 1.0) / 0.35, -1.0, 1.0)
     ls_bias = _auto_clamp((ls_ratio - 1.0) / 0.30, -1.0, 1.0)
+    top_bias = _auto_clamp((top_ratio - 1.0) / 0.28, -1.0, 1.0)
     oi_bias = _auto_clamp(oi_change_pct / 1.20, -1.0, 1.0)
     funding_bias = _auto_clamp(funding_rate / 0.0008, -1.0, 1.0)
-    score = _auto_clamp((taker_bias * 0.46) + (ls_bias * 0.24) + (oi_bias * 0.20) + (funding_bias * 0.10), -1.0, 1.0)
+    flow_score = _auto_clamp(
+        (taker_bias * 0.40) + (oi_bias * 0.24) + (top_bias * 0.26) + (funding_bias * 0.10),
+        -1.0,
+        1.0,
+    )
+    score = _auto_clamp((flow_score * 0.85) + (ls_bias * 0.15), -1.0, 1.0)
     payload = {
         "score": round(score, 4),
+        "flow_score": round(flow_score, 4),
+        "flow_weight": round(float(_AUTO_FLOW_SCORE_WEIGHT), 4),
         "label": _auto_whale_label(score),
         "taker_ratio": round(taker_ratio, 4),
         "long_short_ratio": round(ls_ratio, 4),
+        "top_trader_ratio": round(top_ratio, 4),
         "oi_change_pct": round(oi_change_pct, 4),
         "funding_rate": round(funding_rate, 8),
         "asof_ms": int(now_ts * 1000),
@@ -5594,6 +5624,7 @@ async def _auto_eval_entry_candidate(
     sell_pct = round((1.0 - buy_prob) * 100.0, 2)
     confidence = _confidence_from_buy_prob(buy_prob, raw_confidence=float(score.confidence))
     whale_sentiment = await _auto_fetch_whale_sentiment(symbol=symbol_u)
+    flow_score = float(whale_sentiment.get("flow_score", whale_sentiment.get("score", 0.0)) or 0.0)
     swing = _latest_swing(df, lookback=200)
     swing_up: Optional[bool] = None
     if swing is not None:
@@ -5619,6 +5650,7 @@ async def _auto_eval_entry_candidate(
         "raw_diff": decision["raw_diff"],
         "whale_score": float(whale_sentiment.get("score", 0.0) or 0.0),
         "whale_label": str(whale_sentiment.get("label", "중립")),
+        "flow_score": flow_score,
     }
 
     if swing is None or swing_up is None:
@@ -5727,7 +5759,8 @@ async def _auto_eval_entry_candidate(
         swing_conflict=score_swing_conflict,
         low_volume_block=low_volume_block,
         reversal_ready=reversal_ready,
-        whale_score=float(whale_sentiment.get("score", 0.0) or 0.0),
+        flow_score=flow_score,
+        flow_weight=float(whale_sentiment.get("flow_weight", _AUTO_FLOW_SCORE_WEIGHT) or _AUTO_FLOW_SCORE_WEIGHT),
     )
     score_threshold = float(_AUTO_SIGNAL_SCORE_AGGR if mode_v == "aggressive" else _AUTO_SIGNAL_SCORE_BASE)
     pass_signal_score = float(score_pack.get("total", 0.0) or 0.0) >= score_threshold
@@ -5740,6 +5773,7 @@ async def _auto_eval_entry_candidate(
             "score_threshold": round(float(score_threshold), 4),
             "score_mode": "aggressive" if mode_v == "aggressive" else "base",
             "reversal_ready": 1.0 if reversal_ready else 0.0,
+            "flow_weight": round(float(score_pack.get("flow_weight", _AUTO_FLOW_SCORE_WEIGHT) or _AUTO_FLOW_SCORE_WEIGHT), 4),
         }
     )
 
@@ -6245,6 +6279,8 @@ async def _auto_trade_tick_core(
             "futures_leverage": int(futures_leverage if market == "futures" else 1),
             "whale_score": round(float(signal_info.get("whale_score", 0.0) or 0.0), 4),
             "whale_label": str(signal_info.get("whale_label", "")),
+            "flow_score": round(float(signal_info.get("flow_score", 0.0) or 0.0), 4),
+            "flow_weight": round(float(signal_info.get("flow_weight", _AUTO_FLOW_SCORE_WEIGHT) or _AUTO_FLOW_SCORE_WEIGHT), 4),
             "tp_mode": "manual_pct" if tp_cfg_pct > 0 else "fib_auto",
             "tp_input_pct": round(tp_cfg_pct * 100.0, 6),
             "sl_mode": "manual_pct" if sl_cfg_pct > 0 else "fib_auto",
@@ -6556,6 +6592,8 @@ async def _auto_trade_tick_core(
                 "diff": float(decision.get("diff", 0.0) or 0.0),
                 "whale_score": float(signal_info.get("whale_score", 0.0) or 0.0),
                 "whale_label": str(signal_info.get("whale_label", "")),
+                "flow_score": float(signal_info.get("flow_score", 0.0) or 0.0),
+                "flow_weight": float(signal_info.get("flow_weight", _AUTO_FLOW_SCORE_WEIGHT) or _AUTO_FLOW_SCORE_WEIGHT),
             },
             "plan": {
                 "entry_price": round(entry_exec, 8),

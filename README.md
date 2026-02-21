@@ -72,6 +72,8 @@ export AUTO_TRADE_BG_ENABLED=1
 export AUTO_TRADE_TICK_INTERVAL_S=15
 # 실제 바이낸스 주문 실행(기본: 1)
 export AUTO_TRADE_LIVE_ENABLED=1
+# 플로우 스코어 가중치(기본 0.25, 허용 0.20~0.30)
+export AUTO_FLOW_SCORE_WEIGHT=0.25
 ```
 
 ## API
