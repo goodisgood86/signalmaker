@@ -7297,6 +7297,17 @@ async def api_pass_check_db(
     symbol_u = symbol.upper()
     market_u = market.lower()
     interval_u = interval if interval in ALLOWED_INTERVALS else "5m"
+    now_ms = int(time() * 1000)
+    window_days = 7
+    window_anchor_ms = now_ms
+    try:
+        baseline = await _pc_get_entry_baseline_counts(symbol_u, market_u, interval_u)
+        baseline_latest = int((baseline or {}).get("latest_signal_time_ms", 0) or 0)
+        if baseline_latest > 0:
+            window_anchor_ms = baseline_latest
+    except HTTPException:
+        pass
+    window_start_ms = max(0, window_anchor_ms - (window_days * 24 * 60 * 60 * 1000))
     ref_flow_score = 0.0
     ref_flow_weight = float(_AUTO_FLOW_SCORE_WEIGHT)
     try:
@@ -7305,58 +7316,15 @@ async def api_pass_check_db(
         ref_flow_weight = float(whale_ref.get("flow_weight", _AUTO_FLOW_SCORE_WEIGHT) or _AUTO_FLOW_SCORE_WEIGHT)
     except Exception:
         pass
-    # 1) 요청 interval 요약 통계만 조회 (5m 강제 대체 금지)
+    updated_ms = now_ms
     try:
         summary = await _pc_get_summary(symbol_u, market_u, interval_u, period)
+        if isinstance(summary, dict):
+            updated_ms = int(summary.get("updated_ms", now_ms) or now_ms)
     except HTTPException:
-        summary = None
-    try:
-        progress_row = await _pc_get_progress(symbol_u, market_u, interval_u, period)
-    except HTTPException:
-        progress_row = None
-    if summary:
-        summary_pass = int(summary.get("pass_count", 0) or 0)
-        summary_exec = int(summary.get("executed_count", 0) or 0)
-        summary_no_entry = int(summary.get("no_entry_count", 0) or 0)
-        pass_count = summary_pass
-        executed_count = summary_exec
-        no_entry_count = summary_no_entry
-        first_signal_time_ms = 0
-        if pass_count > 0:
-            try:
-                first_signal_time_ms = await _pc_get_first_signal_time_ms(symbol_u, market_u, interval_u, period)
-            except HTTPException:
-                first_signal_time_ms = 0
-        latest_signal_time_ms = int(summary.get("latest_signal_time_ms", 0) or 0)
-        if latest_signal_time_ms <= 0 and isinstance(progress_row, dict):
-            latest_signal_time_ms = int(progress_row.get("last_signal_time_ms", 0) or 0)
-        # UI 검증구간은 선택 기간(24h/3d/7d) 기준 고정 폭으로 표기한다.
-        if latest_signal_time_ms > 0:
-            period_days = 1 if period == "24h" else 7 if period == "7d" else 3
-            first_signal_time_ms = max(0, latest_signal_time_ms - (period_days * 24 * 60 * 60 * 1000))
-        return _build_pass_check_payload(
-            symbol=symbol_u,
-            market=market_u,
-            interval=interval_u,
-            period=period,
-            pass_count=pass_count,
-            executed_count=executed_count,
-            no_entry_count=no_entry_count,
-            tp1_hit_count=int(summary.get("tp1_hit_count", 0) or 0),
-            sl_hit_count=int(summary.get("sl_hit_count", 0) or 0),
-            no_hit_count=int(summary.get("no_hit_count", 0) or 0),
-            resolved_count=int(summary.get("resolved_count", 0) or 0),
-            first_signal_time_ms=first_signal_time_ms,
-            latest_signal_time_ms=latest_signal_time_ms,
-            updated_ms=int(summary.get("updated_ms", 0) or 0),
-            source="db_summary",
-            flow_score=ref_flow_score,
-            flow_weight=ref_flow_weight,
-            flow_source="current_fixed_ref",
-        )
+        pass
 
-    # 2) 요약이 없으면 기존 이벤트 집계로 fallback
-    start_ms = _pc_window_start_ms(90)
+    # PASS 검증은 항상 최근 7일 고정 구간에서 집계한다.
     rows = await _sb_request(
         "GET",
         "/rest/v1/pass_check_events",
@@ -7366,12 +7334,14 @@ async def api_pass_check_db(
             "market": f"eq.{market_u}",
             "interval": f"eq.{interval_u}",
             "period": f"eq.{period}",
-            "signal_time_ms": f"gte.{start_ms}",
+            "signal_time_ms": f"gte.{window_start_ms}",
             "order": "signal_time_ms.desc",
             "limit": "100000",
         },
     )
     events = rows if isinstance(rows, list) else []
+    if window_anchor_ms > 0:
+        events = [e for e in events if int(e.get("signal_time_ms", 0) or 0) <= window_anchor_ms]
     pass_cnt = len(events)
     executed = [e for e in events if bool(e.get("executed"))]
     executed_cnt = len(executed)
@@ -7392,45 +7362,14 @@ async def api_pass_check_db(
         sl_hit_count=sl_hits,
         no_hit_count=no_hits,
         resolved_count=resolved,
-        first_signal_time_ms=int(events[-1]["signal_time_ms"]) if events else 0,
-        latest_signal_time_ms=int(events[0]["signal_time_ms"]) if events else 0,
-        updated_ms=int(time() * 1000),
-        source="db_events_fallback",
+        first_signal_time_ms=window_start_ms,
+        latest_signal_time_ms=window_anchor_ms,
+        updated_ms=updated_ms,
+        source="db_events_window_7d",
         flow_score=ref_flow_score,
         flow_weight=ref_flow_weight,
         flow_source="current_fixed_ref",
     )
-    if int(payload.get("latest_signal_time_ms", 0) or 0) > 0:
-        period_days = 1 if period == "24h" else 7 if period == "7d" else 3
-        payload["first_signal_time_ms"] = max(
-            0,
-            int(payload.get("latest_signal_time_ms", 0) or 0) - (period_days * 24 * 60 * 60 * 1000),
-        )
-    # fallback 집계 결과를 summary로 시드 (실패해도 본 응답은 반환)
-    try:
-        now_ms = int(time() * 1000)
-        body = {
-            "symbol": symbol_u,
-            "market": market_u,
-            "interval": interval_u,
-            "period": period,
-            "pass_count": int(pass_cnt),
-            "executed_count": int(executed_cnt),
-            "no_entry_count": int(no_entry),
-            "tp1_hit_count": int(tp_hits),
-            "sl_hit_count": int(sl_hits),
-            "no_hit_count": int(no_hits),
-            "resolved_count": int(resolved),
-            "latest_signal_time_ms": int(events[0]["signal_time_ms"]) if events else 0,
-            "updated_ms": now_ms,
-        }
-        existing = await _pc_get_summary(symbol_u, market_u, interval_u, period)
-        if existing:
-            await _sb_request("PATCH", "/rest/v1/pass_check_summary", params={"id": f"eq.{existing.get('id')}"}, json_body=body)
-        else:
-            await _sb_request("POST", "/rest/v1/pass_check_summary", json_body=[body])
-    except HTTPException:
-        pass
     return payload
 
 
