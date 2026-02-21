@@ -6950,6 +6950,7 @@ async def api_analysis(
     score = score_signal(close=close, prev_close=prev_close, ind=ind)
     regime = classify_regime(df)
     avwap_levels, vp = _build_levels(df)
+    whale_sentiment = await _auto_fetch_whale_sentiment(symbol=symbol.upper())
 
     payload: Dict[str, Any] = {
         "symbol": symbol.upper(),
