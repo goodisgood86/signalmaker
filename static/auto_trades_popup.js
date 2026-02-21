@@ -288,13 +288,14 @@ function applyMarketSelection(market) {
 function updateRunningSymbolChip() {
   if (!cfgRunningSymbolChipEl) return;
   const symbol = normalizeTradeSymbol(runningSymbol || cfgSymbolEl?.value || "ALL");
-  if (!autoRunActive) {
+  const label = symbol === "ALL" ? "전체 스캔" : symbol;
+  if (!autoRunActive || !String(label || "").trim()) {
     cfgRunningSymbolChipEl.hidden = true;
     cfgRunningSymbolChipEl.textContent = "";
     return;
   }
   cfgRunningSymbolChipEl.hidden = false;
-  cfgRunningSymbolChipEl.textContent = symbol;
+  cfgRunningSymbolChipEl.textContent = label;
 }
 
 function applySymbolSelection(symbol) {
