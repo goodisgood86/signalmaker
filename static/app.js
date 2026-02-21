@@ -485,6 +485,32 @@ const FX_REFRESH_MS = 60000;
 const NEWS_REFRESH_MS = 300000;
 const SIM_REFRESH_MS = 20000;
 const AUTO_REFRESH_MS = 25000;
+const AUTO_TRADE_POPUP_FALLBACK_ORIGIN = "http://152.42.185.192:8080";
+
+function normalizeOriginCandidate(raw) {
+  const s = String(raw || "").trim();
+  if (!s) return "";
+  try {
+    return new URL(s, window.location.origin).origin;
+  } catch (_) {
+    return "";
+  }
+}
+
+function resolveAutoTradePopupOrigin() {
+  const params = new URLSearchParams(window.location.search || "");
+  const queryOrigin = normalizeOriginCandidate(params.get("auto_trade_origin"));
+  if (queryOrigin) return queryOrigin;
+  try {
+    const savedOrigin = normalizeOriginCandidate(localStorage.getItem("coin.auto_trade_origin"));
+    if (savedOrigin) return savedOrigin;
+  } catch (_) {}
+  const host = String(window.location.hostname || "").toLowerCase();
+  if (host.endsWith("railway.app")) return AUTO_TRADE_POPUP_FALLBACK_ORIGIN;
+  return window.location.origin;
+}
+
+const AUTO_TRADE_POPUP_ORIGIN = resolveAutoTradePopupOrigin();
 
 const COINS = [
   { name: "비트코인", symbol: "BTCUSDT", market: "spot", mark: "₿" },
@@ -3202,7 +3228,8 @@ if (headerAutoBtnEl)
     const left = Math.max(0, Math.floor((screenW - popupW) / 2));
     const top = Math.max(0, Math.floor((screenH - popupH) / 2));
     const features = `width=${popupW},height=${popupH},left=${left},top=${top},resizable=yes,scrollbars=yes`;
-    const pop = window.open(`/static/auto_trades_popup.html?t=${t}`, "auto_trades_popup", features);
+    const popupUrl = `${AUTO_TRADE_POPUP_ORIGIN}/static/auto_trades_popup.html?t=${t}`;
+    const pop = window.open(popupUrl, "auto_trades_popup", features);
     if (pop && !pop.closed) {
       try {
         pop.resizeTo(popupW, popupH);

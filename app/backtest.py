@@ -42,7 +42,7 @@ def _utc_now_text() -> str:
 
 async def _fetch_klines(symbol: str, interval: str, limit: int, market: str) -> List[Dict[str, Any]]:
     base_url = BINANCE_FUTURES_BASE_URL if str(market).lower() == "futures" else BINANCE_SPOT_BASE_URL
-    client = BinanceClient(base_url=base_url)
+    client = BinanceClient(base_url=base_url, market=str(market).lower())
     try:
         ks = await client.klines(symbol=symbol, interval=interval, limit=limit)
     finally:
