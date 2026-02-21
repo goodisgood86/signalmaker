@@ -1364,6 +1364,7 @@ def _calc_pass_check_from_df(
     market: str,
     interval: str,
     horizon_bars: int,
+    signal_horizon_bars: int | None = None,
     entry_window_bars: int,
     min_signal_time_ms: int = 0,
     signal_step: int = 1,
@@ -1374,7 +1375,9 @@ def _calc_pass_check_from_df(
     flow_weight: float = _AUTO_FLOW_SCORE_WEIGHT,
 ) -> Dict[str, Any]:
     start = 220
-    end = len(df) - int(horizon_bars) - 1
+    signal_h = int(signal_horizon_bars) if signal_horizon_bars is not None else int(horizon_bars)
+    signal_h = max(1, signal_h)
+    end = len(df) - signal_h - 1
     if end <= start:
         return {
             "pass_count": 0,
@@ -7327,8 +7330,8 @@ async def api_pass_check_db(
         latest_signal_time_ms = int(summary.get("latest_signal_time_ms", 0) or 0)
         if latest_signal_time_ms <= 0 and isinstance(progress_row, dict):
             latest_signal_time_ms = int(progress_row.get("last_signal_time_ms", 0) or 0)
-        # 무신호 구간에서도 검증 범위를 표기할 수 있도록 최초값을 period 기준으로 보정한다.
-        if first_signal_time_ms <= 0 and latest_signal_time_ms > 0:
+        # UI 검증구간은 선택 기간(24h/3d/7d) 기준 고정 폭으로 표기한다.
+        if latest_signal_time_ms > 0:
             period_days = 1 if period == "24h" else 7 if period == "7d" else 3
             first_signal_time_ms = max(0, latest_signal_time_ms - (period_days * 24 * 60 * 60 * 1000))
         return _build_pass_check_payload(
@@ -7397,6 +7400,12 @@ async def api_pass_check_db(
         flow_weight=ref_flow_weight,
         flow_source="current_fixed_ref",
     )
+    if int(payload.get("latest_signal_time_ms", 0) or 0) > 0:
+        period_days = 1 if period == "24h" else 7 if period == "7d" else 3
+        payload["first_signal_time_ms"] = max(
+            0,
+            int(payload.get("latest_signal_time_ms", 0) or 0) - (period_days * 24 * 60 * 60 * 1000),
+        )
     # fallback 집계 결과를 summary로 시드 (실패해도 본 응답은 반환)
     try:
         now_ms = int(time() * 1000)
@@ -7533,6 +7542,7 @@ async def api_pass_check_batch(
                     market=used_market,
                     interval=interval,
                     horizon_bars=horizon_bars,
+                    signal_horizon_bars=max_horizon,
                     entry_window_bars=5,
                     min_signal_time_ms=last_signal_ms,
                     signal_step=signal_step,
