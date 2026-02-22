@@ -542,7 +542,7 @@ function updateCenterGoogleModalUi() {
   if (centerGoogleModalDescEl) {
     centerGoogleModalDescEl.textContent = linked
       ? "현재 구글 계정이 연동되어 있습니다. 계정 변경 또는 연동 해제를 선택할 수 있습니다."
-      : "허용된 구글 계정으로 로그인하면 자동매매 설정 잠금이 해제됩니다.";
+      : "구글 계정으로 로그인하면 자동매매 설정 잠금이 해제됩니다.";
   }
   if (centerGoogleModalStateEl) centerGoogleModalStateEl.hidden = !linked;
   if (centerGoogleModalStateEmailEl) centerGoogleModalStateEmailEl.textContent = emailTxt || "-";
@@ -551,10 +551,7 @@ function updateCenterGoogleModalUi() {
   if (linked) {
     setCenterGoogleModalNote("계정을 바꾸려면 '계정 변경'을 누른 뒤 다시 로그인하세요.");
   } else {
-    const allowed = Array.isArray(cfgGoogleLogin?.allowedEmails)
-      ? cfgGoogleLogin.allowedEmails.map((x) => String(x || "").trim()).filter(Boolean)
-      : [];
-    setCenterGoogleModalNote(allowed.length ? `허용 계정: ${allowed.join(", ")}` : "");
+    setCenterGoogleModalNote("");
   }
   setCenterGoogleSessionActionBusy(centerGoogleSessionActionBusy);
 }
@@ -590,8 +587,7 @@ function applyConfigLockMethodUi() {
     cfgUnlockBtnEl.hidden = !passwordEnabled;
   }
   if (cfgGoogleHintEl) {
-    const emails = Array.isArray(cfgGoogleLogin?.allowedEmails) ? cfgGoogleLogin.allowedEmails.filter((x) => String(x || "").trim()) : [];
-    cfgGoogleHintEl.textContent = googleEnabled && emails.length ? `허용 계정: ${emails.join(", ")}` : "";
+    cfgGoogleHintEl.textContent = "";
   }
 }
 
