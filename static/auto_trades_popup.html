@@ -785,6 +785,9 @@
         font-size: 18px;
         font-weight: 800;
         font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
       .board {
         border: 1px solid var(--panel-line);
@@ -1043,6 +1046,20 @@
         .filters {
           grid-template-columns: 1fr;
         }
+        .summary {
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+          gap: 6px;
+        }
+        .stat {
+          padding: 8px 7px;
+        }
+        .stat-k {
+          font-size: 10px;
+        }
+        .stat-v {
+          margin-top: 4px;
+          font-size: 13px;
+        }
         .summary-head {
           flex-wrap: nowrap;
         }
@@ -1121,6 +1138,18 @@
       @media (max-width: 420px) {
         .mobile-shell {
           padding: 10px 10px 16px;
+        }
+        .summary {
+          gap: 5px;
+        }
+        .stat {
+          padding: 7px 6px;
+        }
+        .stat-k {
+          font-size: 9px;
+        }
+        .stat-v {
+          font-size: 12px;
         }
         .summary-signal-status {
           max-width: 116px;
@@ -1466,6 +1495,6 @@
       </div>
     </div>
     <script src="https://accounts.google.com/gsi/client" async defer></script>
-    <script src="/static/auto_trades_popup.js?v=20260222zc"></script>
+    <script src="/static/auto_trades_popup.js?v=20260222zd"></script>
   </body>
 </html>
