@@ -119,6 +119,11 @@ let lastCollateralFetchMs = 0;
 const COLLATERAL_MIN_INTERVAL_MS = 30000;
 const STATS_REFRESH_INTERVAL_MS = 60000;
 const RECORDS_NAV_COOLDOWN_MS = 12000;
+
+function isClosedOnlyStatusSelected() {
+  const st = String(filterStatusEl?.value || "ALL").toUpperCase();
+  return st === "TP" || st === "SL" || st === "CLOSED_FAIL";
+}
 let latestOpenCount = null;
 let runningSymbol = "ALL";
 let latestTickStatusText = "";
@@ -1950,6 +1955,8 @@ Promise.all([load(), loadStats()]).catch((e) => alert(e.message || e));
 refreshTimer = setInterval(() => {
   if (document.hidden) return;
   if (recordsLoading) return;
+  // 종료 건 전용 필터에서는 데이터 변동이 거의 없으므로 주기 재조회 생략
+  if (isClosedOnlyStatusSelected()) return;
   if (page > 1) return;
   if (Date.now() < recordsManualNavUntilTs) return;
   load().catch(() => {});
