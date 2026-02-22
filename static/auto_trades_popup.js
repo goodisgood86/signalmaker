@@ -98,6 +98,8 @@ const MAX_OPEN_POSITIONS_LIMIT = 200;
 let page = 1;
 let hasNext = false;
 let activeLoadSeq = 0;
+let activeRecordsController = null;
+let recordsLoading = false;
 let refreshTimer = null;
 let statsRefreshTimer = null;
 let collateralRefreshTimer = null;
@@ -1641,13 +1643,34 @@ function render(records) {
   updateCurrentTradeStateChip(rows);
 }
 
+function setRecordsLoading(loading) {
+  recordsLoading = Boolean(loading);
+  if (prevBtnEl) prevBtnEl.disabled = recordsLoading || page <= 1;
+  if (nextBtnEl) nextBtnEl.disabled = recordsLoading || !hasNext;
+}
+
+function renderPager() {
+  if (pageLabelEl) pageLabelEl.textContent = `${page} 페이지`;
+  if (prevBtnEl) prevBtnEl.disabled = recordsLoading || page <= 1;
+  if (nextBtnEl) nextBtnEl.disabled = recordsLoading || !hasNext;
+}
+
 async function loadStats(sync = false) {
   const data = await fetchJSON(`/api/auto_trade/stats?sync=${sync ? "1" : "0"}`);
   renderSummary(data?.stats || {});
 }
 
-async function load() {
+async function load(options = {}) {
+  const allowRewind = options?.allowRewind !== false;
   const seq = ++activeLoadSeq;
+  if (activeRecordsController) {
+    try {
+      activeRecordsController.abort();
+    } catch (_) {}
+  }
+  const controller = new AbortController();
+  activeRecordsController = controller;
+  setRecordsLoading(true);
   const symbol = filterSymbolEl.value;
   const mode = filterModeEl.value;
   const status = filterStatusEl.value;
@@ -1655,13 +1678,29 @@ async function load() {
   if (symbol && symbol !== "ALL") q.set("symbol", symbol);
   if (mode && mode !== "ALL") q.set("mode", mode);
   if (status && status !== "ALL") q.set("status", status);
-  const data = await fetchJSON(`/api/auto_trade/records?${q.toString()}`);
-  if (seq !== activeLoadSeq) return;
-  render(data?.records || []);
-  hasNext = Boolean(data?.has_next);
-  pageLabelEl.textContent = `${page} 페이지`;
-  prevBtnEl.disabled = page <= 1;
-  nextBtnEl.disabled = !hasNext;
+  try {
+    const data = await fetchJSON(`/api/auto_trade/records?${q.toString()}`, { signal: controller.signal });
+    if (controller.signal.aborted || seq !== activeLoadSeq) return;
+    const rows = Array.isArray(data?.records) ? data.records : [];
+    const next = Boolean(data?.has_next);
+    if (allowRewind && page > 1 && rows.length === 0 && !next) {
+      page = Math.max(1, page - 1);
+      hasNext = false;
+      renderPager();
+      await load({ allowRewind: false });
+      return;
+    }
+    render(rows);
+    hasNext = next;
+    renderPager();
+  } catch (e) {
+    if (e?.name === "AbortError") return;
+    if (String(e?.message || "").toLowerCase().includes("aborted")) return;
+    throw e;
+  } finally {
+    if (activeRecordsController === controller) activeRecordsController = null;
+    if (seq === activeLoadSeq) setRecordsLoading(false);
+  }
 }
 
 function initFilters() {
@@ -1734,6 +1773,7 @@ async function tryUnlockConfig() {
 }
 
 function onFilterChange() {
+  if (recordsLoading) return;
   page = 1;
   load().catch((e) => alert(e.message || e));
 }
@@ -1742,11 +1782,13 @@ filterSymbolEl.addEventListener("change", onFilterChange);
 filterModeEl.addEventListener("change", onFilterChange);
 filterStatusEl.addEventListener("change", onFilterChange);
 prevBtnEl.addEventListener("click", () => {
+  if (recordsLoading) return;
   if (page <= 1) return;
   page -= 1;
   load().catch((e) => alert(e.message || e));
 });
 nextBtnEl.addEventListener("click", () => {
+  if (recordsLoading) return;
   if (!hasNext) return;
   page += 1;
   load().catch((e) => alert(e.message || e));
@@ -1897,10 +1939,12 @@ initConfigInputs();
 consumeGoogleRedirectResult();
 initConfigLock();
 if (recordsBodyEl) recordsBodyEl.innerHTML = `<tr><td colspan="11" class="records-num">불러오는 중...</td></tr>`;
+renderPager();
 Promise.all([load(), loadStats()]).catch((e) => alert(e.message || e));
 
 refreshTimer = setInterval(() => {
   if (document.hidden) return;
+  if (recordsLoading) return;
   load().catch(() => {});
 }, 8000);
 statsRefreshTimer = setInterval(() => {
