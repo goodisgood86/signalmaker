@@ -441,6 +441,102 @@ def _cfg_unlock_enabled() -> bool:
     return bool(_cfg_unlock_expected_hash())
 
 
+def _cfg_google_client_id() -> str:
+    return str(os.getenv("APP_CONFIG_GOOGLE_CLIENT_ID", "")).strip()
+
+
+def _cfg_google_enabled() -> bool:
+    return bool(_cfg_google_client_id())
+
+
+def _cfg_google_allowed_emails() -> set[str]:
+    default_email = "goodisgood86@gmail.com"
+    raw = str(os.getenv("APP_CONFIG_GOOGLE_ALLOWED_EMAILS", default_email)).strip()
+    out: set[str] = set()
+    for item in raw.split(","):
+        v = str(item or "").strip().lower()
+        if v:
+            out.add(v)
+    if not out:
+        out.add(default_email)
+    return out
+
+
+def _cfg_google_allowed_domains() -> set[str]:
+    raw = str(os.getenv("APP_CONFIG_GOOGLE_ALLOWED_DOMAINS", "")).strip()
+    out: set[str] = set()
+    for item in raw.split(","):
+        v = str(item or "").strip().lower()
+        if v.startswith("@"):
+            v = v[1:]
+        if v:
+            out.add(v)
+    return out
+
+
+def _cfg_google_verify_credential(credential: str) -> Dict[str, Any]:
+    token = str(credential or "").strip()
+    if len(token) < 20:
+        raise HTTPException(status_code=400, detail="credential is required")
+    client_id = _cfg_google_client_id()
+    if not client_id:
+        raise HTTPException(status_code=400, detail="google login is not configured")
+
+    tokeninfo_url = str(os.getenv("APP_CONFIG_GOOGLE_TOKENINFO_URL", "https://oauth2.googleapis.com/tokeninfo")).strip()
+    if not tokeninfo_url:
+        tokeninfo_url = "https://oauth2.googleapis.com/tokeninfo"
+    timeout_s = max(2.0, min(12.0, float(str(os.getenv("APP_CONFIG_GOOGLE_TIMEOUT_S", "4.0")) or "4.0")))
+    try:
+        r = httpx.get(tokeninfo_url, params={"id_token": token}, timeout=timeout_s)
+    except Exception:
+        raise HTTPException(status_code=503, detail="google token verification failed")
+    if int(r.status_code) != 200:
+        raise HTTPException(status_code=401, detail="invalid google credential")
+    try:
+        body = r.json()
+    except Exception:
+        body = {}
+    if not isinstance(body, dict):
+        body = {}
+
+    aud = str(body.get("aud", "")).strip()
+    if aud != client_id:
+        raise HTTPException(status_code=401, detail="invalid google audience")
+    iss = str(body.get("iss", "")).strip()
+    if iss not in {"accounts.google.com", "https://accounts.google.com"}:
+        raise HTTPException(status_code=401, detail="invalid google issuer")
+    try:
+        exp_s = int(str(body.get("exp", "0")).strip() or "0")
+    except Exception:
+        exp_s = 0
+    if exp_s <= int(time()):
+        raise HTTPException(status_code=401, detail="google credential expired")
+
+    email = str(body.get("email", "")).strip().lower()
+    if not email:
+        raise HTTPException(status_code=401, detail="google email is missing")
+    email_verified = body.get("email_verified")
+    if email_verified not in {True, "true", "True", "1", 1}:
+        raise HTTPException(status_code=401, detail="google email is not verified")
+
+    allowed_emails = _cfg_google_allowed_emails()
+    if allowed_emails and email not in allowed_emails:
+        raise HTTPException(status_code=403, detail="google account is not allowed")
+
+    allowed_domains = _cfg_google_allowed_domains()
+    if allowed_domains:
+        email_domain = email.split("@", 1)[1] if "@" in email else ""
+        hd = str(body.get("hd", "")).strip().lower()
+        if email_domain not in allowed_domains and hd not in allowed_domains:
+            raise HTTPException(status_code=403, detail="google domain is not allowed")
+
+    return {
+        "email": email,
+        "name": str(body.get("name", "")).strip(),
+        "sub": str(body.get("sub", "")).strip(),
+    }
+
+
 def _cfg_unlock_signing_secret() -> bytes:
     raw = str(os.getenv("APP_CONFIG_UNLOCK_TOKEN_SECRET", "")).strip()
     if not raw:
@@ -1910,7 +2006,16 @@ def api_auto_trade_config_lock_status(
     if enabled:
         sid = request.cookies.get(_CFG_UNLOCK_COOKIE_NAME)
         unlocked = _cfg_unlock_valid_session(sid)
-    return {"ok": True, "enabled": enabled, "unlocked": unlocked}
+    return {
+        "ok": True,
+        "enabled": enabled,
+        "unlocked": unlocked,
+        "google": {
+            "enabled": _cfg_google_enabled(),
+            "client_id": _cfg_google_client_id(),
+            "allowed_emails": sorted(_cfg_google_allowed_emails()),
+        },
+    }
 
 
 @app.post("/api/auto_trade/config_lock/unlock")
@@ -1938,6 +2043,42 @@ def api_auto_trade_config_lock_unlock(
             "enabled": True,
             "unlocked": True,
             "expires_ms": exp_ms,
+        }
+    )
+    cookie_domain = _cookie_domain_for_request(request)
+    resp.set_cookie(
+        key=_CFG_UNLOCK_COOKIE_NAME,
+        value=sid,
+        max_age=_CFG_UNLOCK_SESSION_TTL_S,
+        httponly=True,
+        samesite="lax",
+        secure=bool(request.url.scheme == "https"),
+        path="/",
+        domain=cookie_domain,
+    )
+    return resp
+
+
+@app.post("/api/auto_trade/config_lock/unlock/google")
+def api_auto_trade_config_lock_unlock_google(
+    request: Request,
+    payload: Dict[str, Any] = Body(default={}),
+):
+    if not _cfg_google_enabled():
+        raise HTTPException(status_code=400, detail="google login is not configured")
+    credential = str(payload.get("credential", "")).strip()
+    profile = _cfg_google_verify_credential(credential)
+    ip = request.client.host if request.client else ""
+    ua = request.headers.get("user-agent", "")
+    sid, exp_ms = _cfg_unlock_create_session(ip=ip, ua=ua)
+    resp = JSONResponse(
+        {
+            "ok": True,
+            "enabled": True,
+            "unlocked": True,
+            "expires_ms": exp_ms,
+            "method": "google",
+            "email": str(profile.get("email", "")),
         }
     )
     cookie_domain = _cookie_domain_for_request(request)

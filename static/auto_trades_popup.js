@@ -41,6 +41,11 @@ const cfgCollapseBtnEl = document.getElementById("cfgCollapseBtn");
 const cfgUnlockInputEl = document.getElementById("cfgUnlockInput");
 const cfgUnlockBtnEl = document.getElementById("cfgUnlockBtn");
 const cfgLockStatusEl = document.getElementById("cfgLockStatus");
+const cfgLockDescEl = document.getElementById("cfgLockDesc");
+const cfgGoogleWrapEl = document.getElementById("cfgGoogleWrap");
+const cfgGoogleBtnEl = document.getElementById("cfgGoogleBtn");
+const cfgGoogleHintEl = document.getElementById("cfgGoogleHint");
+const cfgLockOrEl = document.getElementById("cfgLockOr");
 const bnApiKeyEl = document.getElementById("bnApiKey");
 const bnApiSecretEl = document.getElementById("bnApiSecret");
 const bnLinkBtnEl = document.getElementById("bnLinkBtn");
@@ -98,6 +103,9 @@ const STATS_REFRESH_INTERVAL_MS = 60000;
 let latestOpenCount = null;
 let runningSymbol = "ALL";
 let latestTickStatusText = "";
+let cfgGoogleLogin = { enabled: false, clientId: "", allowedEmails: [] };
+let cfgGoogleInitClientId = "";
+let cfgGoogleUnlockBusy = false;
 
 function fmtPrice(v) {
   const n = Number(v);
@@ -459,6 +467,98 @@ function setCfgLockStatus(msg) {
   if (cfgLockStatusEl) cfgLockStatusEl.textContent = msg || "";
 }
 
+function configLockGuideText() {
+  const googleEnabled = Boolean(cfgGoogleLogin?.enabled && cfgGoogleLogin?.clientId);
+  return googleEnabled
+    ? "구글 로그인 또는 비밀번호 입력 후 자동매매 설정을 변경할 수 있습니다."
+    : "비밀번호 입력 후 자동매매 설정을 변경할 수 있습니다.";
+}
+
+function applyConfigLockMethodUi() {
+  const googleEnabled = Boolean(cfgGoogleLogin?.enabled && cfgGoogleLogin?.clientId);
+  if (cfgLockDescEl) cfgLockDescEl.textContent = configLockGuideText();
+  if (cfgGoogleWrapEl) cfgGoogleWrapEl.hidden = !googleEnabled;
+  if (cfgLockOrEl) cfgLockOrEl.hidden = !googleEnabled;
+  if (cfgUnlockInputEl) cfgUnlockInputEl.placeholder = googleEnabled ? "비밀번호(선택)" : "비밀번호 입력";
+  if (cfgGoogleHintEl) {
+    const emails = Array.isArray(cfgGoogleLogin?.allowedEmails) ? cfgGoogleLogin.allowedEmails.filter((x) => String(x || "").trim()) : [];
+    cfgGoogleHintEl.textContent = googleEnabled && emails.length ? `허용 계정: ${emails.join(", ")}` : "";
+  }
+}
+
+function setGoogleUnlockBusy(busy) {
+  cfgGoogleUnlockBusy = Boolean(busy);
+  if (cfgGoogleWrapEl) cfgGoogleWrapEl.classList.toggle("is-busy", cfgGoogleUnlockBusy);
+}
+
+async function unlockByGoogleCredential(credential) {
+  const token = String(credential || "").trim();
+  if (!token) {
+    setCfgLockStatus("구글 인증 토큰이 비어 있습니다. 다시 시도해주세요.");
+    return;
+  }
+  if (cfgGoogleUnlockBusy) return;
+  setGoogleUnlockBusy(true);
+  try {
+    await fetchJSON("/api/auto_trade/config_lock/unlock/google", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ credential: token }),
+    });
+    setConfigLocked(false);
+    setCfgLockStatus("구글 로그인으로 잠금이 해제되었습니다.");
+    await Promise.all([loadConfig(), loadBinanceLink()]);
+  } catch (e) {
+    const msg = errMessage(e);
+    setConfigLocked(true);
+    setCfgLockStatus(`구글 로그인 실패: ${msg}`);
+  } finally {
+    setGoogleUnlockBusy(false);
+  }
+}
+
+function renderGoogleUnlockButton(retry = 0) {
+  const googleEnabled = Boolean(cfgGoogleLogin?.enabled && cfgGoogleLogin?.clientId);
+  if (!googleEnabled || !cfgGoogleBtnEl) return;
+  if (!(window.google && window.google.accounts && window.google.accounts.id)) {
+    if (cfgGoogleHintEl && !String(cfgGoogleHintEl.textContent || "").includes("구글 로그인")) {
+      const base = String(cfgGoogleHintEl.textContent || "").trim();
+      cfgGoogleHintEl.textContent = base ? `${base} · 구글 로그인 로딩 중...` : "구글 로그인 로딩 중...";
+    }
+    if (retry < 20) {
+      setTimeout(() => renderGoogleUnlockButton(retry + 1), 300);
+    }
+    return;
+  }
+  try {
+    if (cfgGoogleInitClientId !== cfgGoogleLogin.clientId) {
+      window.google.accounts.id.initialize({
+        client_id: cfgGoogleLogin.clientId,
+        callback: (resp) => {
+          unlockByGoogleCredential(resp?.credential || "").catch(() => {});
+        },
+      });
+      cfgGoogleInitClientId = cfgGoogleLogin.clientId;
+    }
+    cfgGoogleBtnEl.innerHTML = "";
+    const btnWidth = Math.max(180, Math.min(320, Math.round(cfgGoogleBtnEl.getBoundingClientRect().width || 260)));
+    window.google.accounts.id.renderButton(cfgGoogleBtnEl, {
+      type: "standard",
+      theme: "outline",
+      size: "large",
+      text: "signin_with",
+      shape: "pill",
+      width: btnWidth,
+      locale: "ko",
+    });
+  } catch (_) {
+    if (cfgGoogleHintEl) {
+      const base = String(cfgGoogleHintEl.textContent || "").trim();
+      cfgGoogleHintEl.textContent = base ? `${base} · 구글 로그인 버튼을 표시하지 못했습니다.` : "구글 로그인 버튼을 표시하지 못했습니다.";
+    }
+  }
+}
+
 function setConfigLocked(locked) {
   if (!configSectionEl) return;
   const isLocked = Boolean(locked);
@@ -668,11 +768,15 @@ function errMessage(err) {
   return raw;
 }
 
+function lockPromptText() {
+  return cfgGoogleLogin.enabled ? "먼저 구글 로그인 또는 비밀번호를 입력해주세요." : "먼저 비밀번호를 입력해주세요.";
+}
+
 function handleLockedError(msg) {
   const m = String(msg || "");
   if (!m.includes("config is locked")) return false;
   setConfigLocked(true);
-  setCfgLockStatus("설정이 잠겨 있습니다. 비밀번호를 입력해주세요.");
+  setCfgLockStatus(cfgGoogleLogin.enabled ? "설정이 잠겨 있습니다. 구글 로그인 또는 비밀번호를 입력해주세요." : "설정이 잠겨 있습니다. 비밀번호를 입력해주세요.");
   return true;
 }
 
@@ -681,11 +785,22 @@ async function loadConfigLockStatus() {
     const data = await fetchJSON("/api/auto_trade/config_lock/status");
     const enabled = Boolean(data?.enabled);
     const unlocked = !enabled || Boolean(data?.unlocked);
+    const google = data?.google || {};
+    cfgGoogleLogin = {
+      enabled: Boolean(google?.enabled),
+      clientId: String(google?.client_id || ""),
+      allowedEmails: Array.isArray(google?.allowed_emails) ? google.allowed_emails : [],
+    };
+    applyConfigLockMethodUi();
+    renderGoogleUnlockButton();
     setConfigLocked(!unlocked);
     await loadRuntimeStatus();
     await loadBinanceLink();
     if (!unlocked) {
-      setCfgLockStatus("비밀번호를 입력 후 설정을 사용할 수 있습니다.");
+      const guide = cfgGoogleLogin.enabled
+        ? "구글 로그인 또는 비밀번호 입력 후 설정을 사용할 수 있습니다."
+        : "비밀번호를 입력 후 설정을 사용할 수 있습니다.";
+      setCfgLockStatus(guide);
       return;
     }
     setCfgLockStatus("");
@@ -1002,7 +1117,7 @@ async function loadBinanceLink() {
 
 async function linkBinance() {
   if (!isConfigUnlocked()) {
-    setCfgLockStatus("먼저 비밀번호를 입력해주세요.");
+    setCfgLockStatus(lockPromptText());
     return;
   }
   const apiKey = String(bnApiKeyEl?.value || "").trim();
@@ -1040,7 +1155,7 @@ async function linkBinance() {
 
 async function unlinkBinance() {
   if (!isConfigUnlocked()) {
-    setCfgLockStatus("먼저 비밀번호를 입력해주세요.");
+    setCfgLockStatus(lockPromptText());
     return;
   }
   setBnLinkBusy(true);
@@ -1072,7 +1187,7 @@ async function triggerTickOnce() {
 
 async function toggleTopRun() {
   if (!isConfigUnlocked()) {
-    setCfgLockStatus("먼저 비밀번호를 입력해주세요.");
+    setCfgLockStatus(lockPromptText());
     return;
   }
   if (!autoRunActive && collateralInsufficient) {
@@ -1112,7 +1227,7 @@ async function toggleTopRun() {
 
 async function runNow() {
   if (!isConfigUnlocked()) {
-    setCfgLockStatus("먼저 비밀번호를 입력해주세요.");
+    setCfgLockStatus(lockPromptText());
     return;
   }
   const ok = await saveConfig(true);
@@ -1229,7 +1344,7 @@ function initConfigInputs() {
     cfgSymbolChipsEl.querySelectorAll(".symbol-chip").forEach((chip) => {
       chip.addEventListener("click", () => {
         if (!isConfigUnlocked()) {
-          setCfgLockStatus("먼저 비밀번호를 입력해주세요.");
+          setCfgLockStatus(lockPromptText());
           return;
         }
         const symbol = String(chip.getAttribute("data-symbol") || "").toUpperCase();
@@ -1257,7 +1372,7 @@ function initConfigLock() {
 async function tryUnlockConfig() {
   const inputValue = String(cfgUnlockInputEl?.value || "");
   if (!inputValue) {
-    setCfgLockStatus("비밀번호를 입력해주세요.");
+    setCfgLockStatus(cfgGoogleLogin.enabled ? "구글 로그인 또는 비밀번호를 입력해주세요." : "비밀번호를 입력해주세요.");
     return;
   }
   setUnlockBusy(true);
@@ -1304,7 +1419,7 @@ nextBtnEl.addEventListener("click", () => {
 if (cfgReloadBtnEl)
   cfgReloadBtnEl.addEventListener("click", () => {
     if (!isConfigUnlocked()) {
-      setCfgLockStatus("먼저 비밀번호를 입력해주세요.");
+      setCfgLockStatus(lockPromptText());
       return;
     }
     loadConfig().catch(() => {});

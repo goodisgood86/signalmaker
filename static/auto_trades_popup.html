@@ -204,6 +204,24 @@
         color: rgba(234, 243, 255, 0.82);
         margin-bottom: 9px;
       }
+      .config-lock-or {
+        margin: 8px 0 6px;
+        font-size: 11px;
+        color: rgba(234, 243, 255, 0.64);
+        text-align: center;
+      }
+      .config-lock-google {
+        margin: 0 0 8px;
+      }
+      .config-lock-google.is-busy {
+        opacity: 0.72;
+        pointer-events: none;
+      }
+      .config-lock-google-btn {
+        display: flex;
+        justify-content: center;
+        width: 100%;
+      }
       .config-lock-row {
         display: flex;
         align-items: stretch;
@@ -1022,7 +1040,12 @@
       <div class="config-lock" id="configLock">
         <div class="config-lock-box">
           <div class="config-lock-title">설정 잠금</div>
-          <div class="config-lock-desc">비밀번호 입력 후 자동매매 설정을 변경할 수 있습니다.</div>
+          <div id="cfgLockDesc" class="config-lock-desc">비밀번호 입력 후 자동매매 설정을 변경할 수 있습니다.</div>
+          <div id="cfgGoogleWrap" class="config-lock-google" hidden>
+            <div id="cfgGoogleBtn" class="config-lock-google-btn"></div>
+            <div id="cfgGoogleHint" class="cfg-mini"></div>
+          </div>
+          <div id="cfgLockOr" class="config-lock-or" hidden>또는 비밀번호 입력</div>
           <div class="config-lock-row">
             <input id="cfgUnlockInput" type="password" autocomplete="off" placeholder="비밀번호 입력" />
             <button id="cfgUnlockBtn" class="primary" type="button">해제</button>
@@ -1150,6 +1173,7 @@
         </div>
       </div>
     </div>
-    <script src="/static/auto_trades_popup.js?v=20260222n"></script>
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+    <script src="/static/auto_trades_popup.js?v=20260222p"></script>
   </body>
 </html>
