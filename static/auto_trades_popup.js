@@ -1814,7 +1814,22 @@ if (cfgSlPctEl)
   });
 if (cfgCooldownMinEl) cfgCooldownMinEl.addEventListener("input", () => clampNonNegativeInput(cfgCooldownMinEl));
 if (cfgMaxOpenEl)
+  cfgMaxOpenEl.addEventListener("focus", () => {
+    try {
+      cfgMaxOpenEl.select();
+    } catch (_) {}
+  });
+if (cfgMaxOpenEl)
   cfgMaxOpenEl.addEventListener("input", () => {
+    setConfigDirty(true);
+  });
+if (cfgMaxOpenEl)
+  cfgMaxOpenEl.addEventListener("blur", () => {
+    clampMaxOpenInput();
+    setConfigDirty(true);
+  });
+if (cfgMaxOpenEl)
+  cfgMaxOpenEl.addEventListener("change", () => {
     clampMaxOpenInput();
     setConfigDirty(true);
   });
