@@ -369,8 +369,16 @@ def _auth_expected_hash() -> str:
     return ""
 
 
+def _auth_scope() -> str:
+    scope = str(os.getenv("APP_AUTH_SCOPE", "config_only")).strip().lower()
+    if scope in {"global", "all", "full", "site"}:
+        return "global"
+    return "config_only"
+
+
 def _auth_enabled() -> bool:
-    return bool(_auth_expected_hash())
+    # 기본 정책: 메인/기록은 공개, 자동매매 설정 영역만 config lock으로 제한
+    return _auth_scope() == "global" and bool(_auth_expected_hash())
 
 
 def _cookie_domain_for_request(request: Request) -> str | None:
