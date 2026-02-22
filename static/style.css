@@ -1928,3 +1928,37 @@ body.desktop-mode .coin-side {
 body.desktop-mode .sim-box {
   display: grid !important;
 }
+
+/* recent auto-record summary: keep title row and target selector in one line */
+#autoRecordSummary .passcheck-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+#autoRecordSummary .passcheck-title {
+  white-space: nowrap;
+}
+
+#autoRecordSummary .passcheck-head-right {
+  width: auto;
+  margin-left: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: nowrap;
+  min-width: 0;
+  max-width: 100%;
+}
+
+#autoRecordSummary .passcheck-period-wrap {
+  margin-left: 0;
+  justify-self: auto;
+}
+
+#autoRecordSummary .passcheck-period-wrap select {
+  min-width: 0;
+  width: clamp(132px, 42vw, 228px);
+  max-width: 52vw;
+}
