@@ -485,8 +485,6 @@ const FX_REFRESH_MS = 60000;
 const NEWS_REFRESH_MS = 300000;
 const SIM_REFRESH_MS = 20000;
 const AUTO_REFRESH_MS = 25000;
-const AUTO_TRADE_POPUP_FALLBACK_ORIGIN = "https://auto.signalmaker.pro";
-const AUTO_TRADE_POPUP_MAIN_HOSTS = new Set(["signalmaker.pro", "www.signalmaker.pro"]);
 
 function normalizeOriginCandidate(raw) {
   const s = String(raw || "").trim();
@@ -506,9 +504,6 @@ function resolveAutoTradePopupOrigin() {
     const savedOrigin = normalizeOriginCandidate(localStorage.getItem("coin.auto_trade_origin"));
     if (savedOrigin) return savedOrigin;
   } catch (_) {}
-  const host = String(window.location.hostname || "").toLowerCase();
-  if (AUTO_TRADE_POPUP_MAIN_HOSTS.has(host)) return AUTO_TRADE_POPUP_FALLBACK_ORIGIN;
-  if (host.endsWith("railway.app")) return AUTO_TRADE_POPUP_FALLBACK_ORIGIN;
   return window.location.origin;
 }
 

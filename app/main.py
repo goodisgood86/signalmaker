@@ -325,6 +325,22 @@ _AUTO_TP1_BE_BUFFER_PCT = max(
     0.0,
     min(0.005, float(str(os.getenv("AUTO_TP1_BE_BUFFER_PCT", "0.0004")) or "0.0004")),
 )
+_AUTO_FIB_TP_GAP_MIN_PCT = max(
+    0.002,
+    min(0.03, float(str(os.getenv("AUTO_FIB_TP_GAP_MIN_PCT", "0.009")) or "0.009")),
+)
+_AUTO_FIB_TP_GAP_MAX_PCT = max(
+    _AUTO_FIB_TP_GAP_MIN_PCT,
+    min(0.08, float(str(os.getenv("AUTO_FIB_TP_GAP_MAX_PCT", "0.05")) or "0.05")),
+)
+_AUTO_FIB_TP_GAP_ATR_MULT = max(
+    0.4,
+    min(3.0, float(str(os.getenv("AUTO_FIB_TP_GAP_ATR_MULT", "1.05")) or "1.05")),
+)
+_AUTO_FIB_TP2_GAP_MULT = max(
+    0.2,
+    min(2.5, float(str(os.getenv("AUTO_FIB_TP2_GAP_MULT", "1.0")) or "1.0")),
+)
 _AUTO_WS_PRICE_ENABLED = str(os.getenv("AUTO_WS_PRICE_ENABLED", "1")).strip().lower() not in {"0", "false", "no", "off"}
 _AUTO_WS_PRICE_MAX_STALE_S = max(
     3.0,
@@ -2523,7 +2539,7 @@ def _auto_build_fib_trade_plan(
     if str(mode or "").lower() == "aggressive":
         atr_pct *= 1.1
     stop_gap = min(0.03, max(0.006, atr_pct * 0.9))
-    tp_gap = min(0.03, max(0.005, atr_pct * 0.8))
+    tp_gap = min(_AUTO_FIB_TP_GAP_MAX_PCT, max(_AUTO_FIB_TP_GAP_MIN_PCT, atr_pct * _AUTO_FIB_TP_GAP_ATR_MULT))
 
     entry = 0.0
     entry_lo = 0.0
@@ -2538,7 +2554,7 @@ def _auto_build_fib_trade_plan(
             entry = (entry_lo + entry_hi) / 2.0
             stop = min(p0786, entry * (1.0 - stop_gap))
             tp1 = max(p0236, entry * (1.0 + tp_gap))
-            tp2 = max(p0, tp1 * (1.0 + tp_gap * 0.65))
+            tp2 = max(p0, tp1 * (1.0 + tp_gap * _AUTO_FIB_TP2_GAP_MULT))
         else:
             # 하락 우세에서는 추격하지 않고 반등 구간(0.236 근처) 도달을 기다린다.
             entry_lo = min(p0, p0236)
@@ -2546,7 +2562,7 @@ def _auto_build_fib_trade_plan(
             entry = (entry_lo + entry_hi) / 2.0
             stop = min(lo * (1.0 - stop_gap * 0.8), entry * (1.0 - stop_gap))
             tp1 = max(p0382, entry * (1.0 + tp_gap))
-            tp2 = max(p05, tp1 * (1.0 + tp_gap * 0.65))
+            tp2 = max(p05, tp1 * (1.0 + tp_gap * _AUTO_FIB_TP2_GAP_MULT))
         if not (stop < entry < tp1 < tp2):
             return None
     else:
@@ -2556,14 +2572,14 @@ def _auto_build_fib_trade_plan(
             entry = (entry_lo + entry_hi) / 2.0
             stop = max(p0786, entry * (1.0 + stop_gap))
             tp1 = min(p0236, entry * (1.0 - tp_gap))
-            tp2 = min(p0, tp1 * (1.0 - tp_gap * 0.65))
+            tp2 = min(p0, tp1 * (1.0 - tp_gap * _AUTO_FIB_TP2_GAP_MULT))
         else:
             entry_lo = min(p0, p0236)
             entry_hi = max(p0, p0236)
             entry = (entry_lo + entry_hi) / 2.0
             stop = max(hi * (1.0 + stop_gap * 0.8), entry * (1.0 + stop_gap))
             tp1 = min(p0382, entry * (1.0 - tp_gap))
-            tp2 = min(p05, tp1 * (1.0 - tp_gap * 0.65))
+            tp2 = min(p05, tp1 * (1.0 - tp_gap * _AUTO_FIB_TP2_GAP_MULT))
         if not (tp2 < tp1 < entry < stop):
             return None
 
