@@ -35,6 +35,7 @@ const cfgTopRunBtnEl = document.getElementById("cfgTopRunBtn");
 const cfgTopRunHintEl = document.getElementById("cfgTopRunHint");
 const cfgRunningSymbolChipEl = document.getElementById("cfgRunningSymbolChip");
 const centerGoogleAuthBtnEl = document.getElementById("centerGoogleAuthBtn");
+const centerGoogleAuthBtnTextEl = document.getElementById("centerGoogleAuthBtnText");
 const cfgStatusEl = document.getElementById("cfgStatus");
 const cfgSaveHintEl = document.getElementById("cfgSaveHint");
 const configSectionEl = document.getElementById("configSection");
@@ -65,6 +66,9 @@ const logicOpenBtnEl = document.getElementById("logicOpenBtn");
 const centerCloseBtnEl = document.getElementById("centerCloseBtn");
 const logicModalEl = document.getElementById("logicModal");
 const logicModalCloseBtnEl = document.getElementById("logicModalCloseBtn");
+const centerGoogleModalEl = document.getElementById("centerGoogleModal");
+const centerGoogleModalBtnEl = document.getElementById("centerGoogleModalBtn");
+const centerGoogleModalCloseBtnEl = document.getElementById("centerGoogleModalCloseBtn");
 
 const SYMBOLS = ["ALL", "BTCUSDT", "ETHUSDT", "XRPUSDT", "DOGEUSDT", "SUIUSDT", "SOLUSDT", "CROSSUSDT"];
 const TRADE_SYMBOLS = ["BTCUSDT", "ETHUSDT", "XRPUSDT", "DOGEUSDT", "SUIUSDT", "SOLUSDT", "CROSSUSDT"];
@@ -498,7 +502,7 @@ function updateCenterGoogleAuthButton() {
   if (!centerGoogleAuthBtnEl) return;
   const linked = isGoogleSessionUnlocked();
   centerGoogleAuthBtnEl.classList.toggle("linked", linked);
-  centerGoogleAuthBtnEl.textContent = linked ? "구글 연동 중" : "구글 연동";
+  if (centerGoogleAuthBtnTextEl) centerGoogleAuthBtnTextEl.textContent = linked ? "구글 연동 중" : "구글 연동";
   if (linked) {
     const emailTxt = String(cfgUnlockSessionEmail || "").trim();
     centerGoogleAuthBtnEl.title = emailTxt ? `연동 계정: ${emailTxt}\n클릭하면 연동 해제` : "클릭하면 연동 해제";
@@ -562,6 +566,7 @@ async function unlockByGoogleCredential(credential) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ credential: token }),
     });
+    setCenterGoogleModalOpen(false);
     setUnlockSessionInfo({ method: String(data?.method || "google"), email: String(data?.email || "") });
     setConfigLocked(false);
     setCfgLockStatus("구글 로그인으로 잠금이 해제되었습니다.");
@@ -590,6 +595,20 @@ function renderGoogleUnlockButton(retry = 0) {
     }
     return;
   }
+  const renderInto = (targetEl) => {
+    if (!targetEl) return;
+    targetEl.innerHTML = "";
+    const btnWidth = Math.max(180, Math.min(320, Math.round(targetEl.getBoundingClientRect().width || 260)));
+    window.google.accounts.id.renderButton(targetEl, {
+      type: "standard",
+      theme: "filled_black",
+      size: "large",
+      text: "signin_with",
+      shape: "pill",
+      width: btnWidth,
+      locale: "ko",
+    });
+  };
   try {
     if (cfgGoogleInitClientId !== cfgGoogleLogin.clientId) {
       window.google.accounts.id.initialize({
@@ -600,25 +619,21 @@ function renderGoogleUnlockButton(retry = 0) {
       });
       cfgGoogleInitClientId = cfgGoogleLogin.clientId;
     }
-    if (cfgGoogleBtnEl) {
-      cfgGoogleBtnEl.innerHTML = "";
-      const btnWidth = Math.max(180, Math.min(320, Math.round(cfgGoogleBtnEl.getBoundingClientRect().width || 260)));
-      window.google.accounts.id.renderButton(cfgGoogleBtnEl, {
-        type: "standard",
-        theme: "filled_black",
-        size: "large",
-        text: "signin_with",
-        shape: "pill",
-        width: btnWidth,
-        locale: "ko",
-      });
-    }
+    renderInto(cfgGoogleBtnEl);
+    renderInto(centerGoogleModalBtnEl);
   } catch (_) {
     if (cfgGoogleHintEl) {
       const base = String(cfgGoogleHintEl.textContent || "").trim();
       cfgGoogleHintEl.textContent = base ? `${base} · 구글 로그인 버튼을 표시하지 못했습니다.` : "구글 로그인 버튼을 표시하지 못했습니다.";
     }
   }
+}
+
+function setCenterGoogleModalOpen(open) {
+  if (!centerGoogleModalEl) return;
+  const isOpen = Boolean(open);
+  centerGoogleModalEl.hidden = !isOpen;
+  document.body.style.overflow = isOpen ? "hidden" : "";
 }
 
 function openGoogleLoginPrompt(retry = 0) {
@@ -628,9 +643,9 @@ function openGoogleLoginPrompt(retry = 0) {
     setTopHint("구글 연동이 설정되지 않았습니다.");
     return;
   }
+  setCenterGoogleModalOpen(true);
   renderGoogleUnlockButton();
-  const id = window.google?.accounts?.id;
-  if (!id) {
+  if (!(window.google && window.google.accounts && window.google.accounts.id)) {
     setCfgLockStatus("구글 로그인 모듈 로딩 중입니다. 잠시 후 다시 시도해주세요.");
     setTopHint("구글 로그인 모듈 로딩 중입니다. 잠시 후 다시 시도해주세요.");
     if (retry < 10) {
@@ -638,19 +653,7 @@ function openGoogleLoginPrompt(retry = 0) {
     }
     return;
   }
-  try {
-    id.prompt((notification) => {
-      try {
-        if (notification?.isNotDisplayed?.() || notification?.isSkippedMoment?.()) {
-          setCfgLockStatus("구글 로그인 창이 표시되지 않았습니다. 브라우저 팝업 차단을 확인해주세요.");
-          setTopHint("구글 로그인 창이 표시되지 않았습니다. 브라우저 팝업 차단을 확인해주세요.");
-        }
-      } catch (_) {}
-    });
-  } catch (_) {
-    setCfgLockStatus("구글 로그인 창을 열지 못했습니다. 다시 시도해주세요.");
-    setTopHint("구글 로그인 창을 열지 못했습니다. 다시 시도해주세요.");
-  }
+  setTopHint("구글 로그인 버튼을 눌러 연동을 진행해주세요.");
 }
 
 function setConfigLocked(locked) {
@@ -920,6 +923,7 @@ async function loadConfigLockStatus() {
 
 async function lockConfigSession() {
   try {
+    setCenterGoogleModalOpen(false);
     await fetchJSON("/api/auto_trade/config_lock/lock", { method: "POST" });
     setConfigLocked(true);
     setCfgLockStatus(lockPromptText());
@@ -1647,15 +1651,24 @@ if (centerCloseBtnEl)
     if (!window.closed) window.location.href = "/";
   });
 if (logicModalCloseBtnEl) logicModalCloseBtnEl.addEventListener("click", () => setLogicModalOpen(false));
+if (centerGoogleModalCloseBtnEl) centerGoogleModalCloseBtnEl.addEventListener("click", () => setCenterGoogleModalOpen(false));
 if (logicModalEl) {
   logicModalEl.addEventListener("click", (ev) => {
     if (ev.target === logicModalEl) setLogicModalOpen(false);
   });
 }
+if (centerGoogleModalEl) {
+  centerGoogleModalEl.addEventListener("click", (ev) => {
+    if (ev.target === centerGoogleModalEl) setCenterGoogleModalOpen(false);
+  });
+}
 window.addEventListener("keydown", (ev) => {
   if (ev.key !== "Escape") return;
-  if (!logicModalEl || logicModalEl.hidden) return;
-  setLogicModalOpen(false);
+  if (centerGoogleModalEl && !centerGoogleModalEl.hidden) {
+    setCenterGoogleModalOpen(false);
+    return;
+  }
+  if (logicModalEl && !logicModalEl.hidden) setLogicModalOpen(false);
 });
 
 initFilters();

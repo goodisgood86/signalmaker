@@ -54,6 +54,9 @@
         letter-spacing: -0.2px;
       }
       .center-google-auth-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
         width: auto;
         min-width: 102px;
         height: 32px;
@@ -69,6 +72,33 @@
         border-color: rgba(86, 238, 181, 0.48);
         background: rgba(86, 238, 181, 0.18);
         color: rgba(222, 255, 242, 0.98);
+      }
+      .center-google-auth-btn .google-mark {
+        width: 17px;
+        height: 17px;
+        border-radius: 999px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 10px;
+        font-weight: 900;
+        color: #0b1020;
+        background: conic-gradient(
+          #4285f4 0deg 80deg,
+          #34a853 80deg 170deg,
+          #fbbc05 170deg 255deg,
+          #ea4335 255deg 360deg
+        );
+      }
+      .center-google-auth-btn .google-mark::after {
+        content: "G";
+        display: inline-block;
+        width: 13px;
+        height: 13px;
+        border-radius: 999px;
+        line-height: 13px;
+        text-align: center;
+        background: #ffffff;
       }
       .head-tools {
         display: inline-flex;
@@ -102,6 +132,58 @@
         padding: 14px;
         background: rgba(2, 7, 18, 0.64);
         backdrop-filter: blur(2px);
+      }
+      .center-google-modal {
+        position: fixed;
+        inset: 0;
+        z-index: 230;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 14px;
+        background: rgba(2, 7, 18, 0.68);
+        backdrop-filter: blur(2px);
+      }
+      .center-google-modal[hidden] {
+        display: none !important;
+      }
+      .center-google-modal-dialog {
+        width: min(420px, 100%);
+        border-radius: 14px;
+        border: 1px solid rgba(185, 211, 255, 0.3);
+        background: linear-gradient(180deg, rgba(8, 18, 38, 0.98), rgba(4, 12, 27, 0.98));
+        box-shadow: 0 24px 58px rgba(0, 0, 0, 0.44);
+        padding: 14px;
+      }
+      .center-google-modal-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+      }
+      .center-google-modal-title {
+        font-size: 15px;
+        font-weight: 820;
+      }
+      .center-google-modal-close {
+        width: auto;
+        min-width: 66px;
+        height: 30px;
+        padding: 0 10px;
+        font-size: 12px;
+      }
+      .center-google-modal-desc {
+        margin-top: 6px;
+        font-size: 12px;
+        color: rgba(234, 243, 255, 0.84);
+      }
+      .center-google-modal-btn {
+        margin-top: 10px;
+        display: flex;
+        justify-content: center;
+      }
+      .center-google-modal-btn > div {
+        width: min(320px, 100%) !important;
       }
       .logic-modal[hidden] {
         display: none !important;
@@ -983,7 +1065,10 @@
     <div class="head">
       <div class="head-main">
         <div class="title">자동매매 센터</div>
-        <button id="centerGoogleAuthBtn" class="center-google-auth-btn" type="button">구글 연동</button>
+        <button id="centerGoogleAuthBtn" class="center-google-auth-btn" type="button">
+          <span class="google-mark" aria-hidden="true"></span>
+          <span id="centerGoogleAuthBtnText">구글 연동</span>
+        </button>
       </div>
       <div class="head-tools">
         <button id="logicOpenBtn" class="ghost logic-open-btn" type="button">로직 보기</button>
@@ -1251,7 +1336,17 @@
         </div>
       </div>
     </div>
+    <div id="centerGoogleModal" class="center-google-modal" hidden>
+      <div class="center-google-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="centerGoogleModalTitle">
+        <div class="center-google-modal-head">
+          <div id="centerGoogleModalTitle" class="center-google-modal-title">구글 연동</div>
+          <button id="centerGoogleModalCloseBtn" class="ghost center-google-modal-close" type="button">닫기</button>
+        </div>
+        <div class="center-google-modal-desc">허용된 구글 계정으로 로그인하면 자동매매 설정이 잠금 해제됩니다.</div>
+        <div id="centerGoogleModalBtn" class="center-google-modal-btn"></div>
+      </div>
+    </div>
     <script src="https://accounts.google.com/gsi/client" async defer></script>
-    <script src="/static/auto_trades_popup.js?v=20260222u"></script>
+    <script src="/static/auto_trades_popup.js?v=20260222v"></script>
   </body>
 </html>
