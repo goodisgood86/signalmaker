@@ -481,13 +481,24 @@ function configLockGuideText() {
 function applyConfigLockMethodUi() {
   const googleEnabled = Boolean(cfgGoogleLogin?.enabled && cfgGoogleLogin?.clientId);
   const passwordEnabled = Boolean(cfgPasswordUnlockEnabled);
+  const passwordRowEl = cfgPasswordRowEl || document.querySelector(".config-lock-row");
   if (cfgLockDescEl) cfgLockDescEl.textContent = configLockGuideText();
   if (cfgGoogleWrapEl) cfgGoogleWrapEl.hidden = !googleEnabled;
-  if (cfgPasswordRowEl) cfgPasswordRowEl.hidden = !passwordEnabled;
+  if (passwordRowEl) {
+    passwordRowEl.hidden = !passwordEnabled;
+    if (!passwordEnabled) passwordRowEl.style.display = "none";
+    else passwordRowEl.style.display = "";
+  }
   if (cfgLockOrEl) cfgLockOrEl.hidden = !(googleEnabled && passwordEnabled);
   if (cfgUnlockInputEl) cfgUnlockInputEl.placeholder = googleEnabled && passwordEnabled ? "비밀번호(선택)" : "비밀번호 입력";
-  if (cfgUnlockInputEl && !passwordEnabled) cfgUnlockInputEl.value = "";
-  if (cfgUnlockBtnEl) cfgUnlockBtnEl.disabled = !passwordEnabled || configUnlockBusy;
+  if (cfgUnlockInputEl) {
+    if (!passwordEnabled) cfgUnlockInputEl.value = "";
+    cfgUnlockInputEl.hidden = !passwordEnabled;
+  }
+  if (cfgUnlockBtnEl) {
+    cfgUnlockBtnEl.disabled = !passwordEnabled || configUnlockBusy;
+    cfgUnlockBtnEl.hidden = !passwordEnabled;
+  }
   if (cfgGoogleHintEl) {
     const emails = Array.isArray(cfgGoogleLogin?.allowedEmails) ? cfgGoogleLogin.allowedEmails.filter((x) => String(x || "").trim()) : [];
     cfgGoogleHintEl.textContent = googleEnabled && emails.length ? `허용 계정: ${emails.join(", ")}` : "";
@@ -552,7 +563,7 @@ function renderGoogleUnlockButton(retry = 0) {
     const btnWidth = Math.max(180, Math.min(320, Math.round(cfgGoogleBtnEl.getBoundingClientRect().width || 260)));
     window.google.accounts.id.renderButton(cfgGoogleBtnEl, {
       type: "standard",
-      theme: "outline",
+      theme: "filled_black",
       size: "large",
       text: "signin_with",
       shape: "pill",
