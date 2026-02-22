@@ -7338,7 +7338,7 @@ async def api_auto_trade_records(
     symbol: str = Query("", max_length=20),
     mode: str = Query("", max_length=20),
     status_filter: str = Query("", alias="status", max_length=20),
-    limit: int = Query(20, ge=1, le=200),
+    limit: int = Query(15, ge=1, le=200),
     page: int = Query(1, ge=1, le=10000),
     sync_updates: bool = Query(False, alias="sync"),
 ):

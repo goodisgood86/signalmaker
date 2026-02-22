@@ -1453,7 +1453,7 @@ async function load() {
   const symbol = filterSymbolEl.value;
   const mode = filterModeEl.value;
   const status = filterStatusEl.value;
-  const q = new URLSearchParams({ limit: "20", page: String(page), sync: "0" });
+  const q = new URLSearchParams({ limit: "15", page: String(page), sync: "0" });
   if (symbol && symbol !== "ALL") q.set("symbol", symbol);
   if (mode && mode !== "ALL") q.set("mode", mode);
   if (status && status !== "ALL") q.set("status", status);
