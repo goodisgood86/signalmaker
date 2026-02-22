@@ -326,6 +326,19 @@ _AUTO_TP1_BE_BUFFER_PCT = max(
     0.0,
     min(0.005, float(str(os.getenv("AUTO_TP1_BE_BUFFER_PCT", "0.0004")) or "0.0004")),
 )
+_AUTO_SL_DEFENSE_ENABLED = str(os.getenv("AUTO_SL_DEFENSE_ENABLED", "1")).strip().lower() not in {"0", "false", "no", "off"}
+_AUTO_SL_DEFENSE_RECOVER_PCT = max(
+    0.0,
+    min(0.003, float(str(os.getenv("AUTO_SL_DEFENSE_RECOVER_PCT", "0.0003")) or "0.0003")),
+)
+_AUTO_SL_DEFENSE_SHIFT_PCT = max(
+    0.0002,
+    min(0.01, float(str(os.getenv("AUTO_SL_DEFENSE_SHIFT_PCT", "0.0025")) or "0.0025")),
+)
+_AUTO_SL_DEFENSE_MAX_DIST_PCT = max(
+    _AUTO_SL_DEFENSE_SHIFT_PCT,
+    min(0.05, float(str(os.getenv("AUTO_SL_DEFENSE_MAX_DIST_PCT", "0.015")) or "0.015")),
+)
 _AUTO_FIB_TP_GAP_MIN_PCT = max(
     0.002,
     min(0.03, float(str(os.getenv("AUTO_FIB_TP_GAP_MIN_PCT", "0.009")) or "0.009")),
@@ -909,6 +922,47 @@ def _auto_tp1_breakeven_stop(*, side: str, entry_price: float, prev_stop: float)
     if stop <= 0:
         return be
     return max(stop, be)
+
+
+def _auto_should_defend_sl(
+    *,
+    side: str,
+    entry_price: float,
+    stop_price: float,
+    close_price: float,
+    state: Dict[str, Any],
+) -> bool:
+    if not _AUTO_SL_DEFENSE_ENABLED:
+        return False
+    if bool(state.get("sl_defense_used", False)):
+        return False
+    entry = float(entry_price or 0.0)
+    stop = float(stop_price or 0.0)
+    close = float(close_price or 0.0)
+    if entry <= 0 or stop <= 0 or close <= 0:
+        return False
+    recover = float(_AUTO_SL_DEFENSE_RECOVER_PCT)
+    s = str(side or "").upper()
+    if s == "SELL":
+        return close < (entry * (1.0 - recover))
+    return close > (entry * (1.0 + recover))
+
+
+def _auto_sl_defense_stop(*, side: str, entry_price: float, prev_stop: float) -> float:
+    entry = float(entry_price or 0.0)
+    stop = float(prev_stop or 0.0)
+    if entry <= 0 or stop <= 0:
+        return stop
+    shift = float(_AUTO_SL_DEFENSE_SHIFT_PCT)
+    max_dist = float(_AUTO_SL_DEFENSE_MAX_DIST_PCT)
+    s = str(side or "").upper()
+    if s == "SELL":
+        widened = stop * (1.0 + shift)
+        cap = entry * (1.0 + max_dist)
+        return max(stop, min(widened, cap))
+    widened = stop * (1.0 - shift)
+    floor = entry * (1.0 - max_dist)
+    return min(stop, max(widened, floor))
 
 
 async def _auto_ws_price_worker(*, market: str, symbols: List[str]) -> None:
@@ -3017,6 +3071,31 @@ def _auto_eval_record_status(record: Dict[str, Any], klines: List[Any], now_ms: 
     last_close: Optional[float] = None
     changed_open = False
 
+    def _try_sl_defense(close_px: float) -> bool:
+        nonlocal sl, changed_open
+        if not _auto_should_defend_sl(
+            side=side,
+            entry_price=entry,
+            stop_price=sl,
+            close_price=close_px,
+            state=state,
+        ):
+            return False
+        new_sl = _auto_sl_defense_stop(side=side, entry_price=entry, prev_stop=sl)
+        if side == "SELL":
+            if new_sl <= (sl + 1e-12):
+                return False
+        else:
+            if new_sl >= (sl - 1e-12):
+                return False
+        sl = float(new_sl)
+        state["sl_defense_used"] = True
+        state["sl_defense_count"] = int(state.get("sl_defense_count", 0) or 0) + 1
+        state["sl_defense_at_ms"] = int(now_ms)
+        state["be_stop_price"] = round(sl, 8)
+        changed_open = True
+        return True
+
     for k in klines:
         k_open = int(getattr(k, "open_time_ms", 0))
         k_close = int(getattr(k, "close_time_ms", 0))
@@ -3030,6 +3109,8 @@ def _auto_eval_record_status(record: Dict[str, Any], klines: List[Any], now_ms: 
             if not tp1_hit:
                 # 동시 터치 시 보수적으로 손절 우선
                 if lo <= sl:
+                    if _try_sl_defense(last_close or 0.0):
+                        continue
                     final_pnl = realized + _auto_calc_pnl(side=side, entry_price=entry, exit_price=sl, qty=rem_qty)
                     return {
                         "changed": True,
@@ -3081,6 +3162,8 @@ def _auto_eval_record_status(record: Dict[str, Any], klines: List[Any], now_ms: 
                         }
             else:
                 if lo <= sl:
+                    if _try_sl_defense(last_close or 0.0):
+                        continue
                     final_pnl = realized + _auto_calc_pnl(side=side, entry_price=entry, exit_price=sl, qty=rem_qty)
                     return {
                         "changed": True,
@@ -3125,6 +3208,8 @@ def _auto_eval_record_status(record: Dict[str, Any], klines: List[Any], now_ms: 
         else:
             if not tp1_hit:
                 if hi >= sl:
+                    if _try_sl_defense(last_close or 0.0):
+                        continue
                     final_pnl = realized + _auto_calc_pnl(side=side, entry_price=entry, exit_price=sl, qty=rem_qty)
                     return {
                         "changed": True,
@@ -3176,6 +3261,8 @@ def _auto_eval_record_status(record: Dict[str, Any], klines: List[Any], now_ms: 
                         }
             else:
                 if hi >= sl:
+                    if _try_sl_defense(last_close or 0.0):
+                        continue
                     final_pnl = realized + _auto_calc_pnl(side=side, entry_price=entry, exit_price=sl, qty=rem_qty)
                     return {
                         "changed": True,
@@ -3577,6 +3664,125 @@ async def _auto_apply_live_partial_close(
         "pnl_usdt": round(realized_after, 8),
         "qty": round(rem_after, 8),
         "stop_loss_price": round(sl_price, 8),
+        "reason": _auto_reason_pack(merged_state),
+    }
+
+
+async def _auto_apply_live_stop_update(
+    *,
+    user_id: int,
+    record: Dict[str, Any],
+    old_state: Dict[str, Any],
+    new_state: Dict[str, Any],
+    stop_price: float,
+) -> Dict[str, Any]:
+    if not _AUTO_LIVE_TRADING_ENABLED:
+        return {}
+    new_stop = float(stop_price or 0.0)
+    if new_stop <= 0:
+        return {}
+    side = str(old_state.get("side", record.get("side", "BUY"))).upper()
+    market = str(record.get("market", "spot")).lower()
+    symbol = str(record.get("symbol", "")).upper()
+    rem_qty = float(new_state.get("remaining_qty", old_state.get("remaining_qty", record.get("qty", 0.0))) or 0.0)
+    if rem_qty <= 0:
+        return {}
+    close_side = "SELL" if side == "BUY" else "BUY"
+    if market == "spot" and close_side == "SELL":
+        rem_qty *= 0.999
+    rec_id = _auto_int_or_none(record.get("id"))
+    api_key, api_secret = await _auto_get_binance_credentials(user_id)
+    prev_sl_oid = str(old_state.get("protect_sl_order_id", "") or "")
+    prev_sl_cid = str(old_state.get("protect_sl_client_id", "") or "")
+    if prev_sl_oid or prev_sl_cid:
+        try:
+            await _auto_cancel_order(
+                market=market,
+                symbol=symbol,
+                api_key=api_key,
+                api_secret=api_secret,
+                order_id=prev_sl_oid,
+                client_order_id=prev_sl_cid,
+            )
+        except HTTPException as e:
+            await _auto_audit_log(
+                user_id=user_id,
+                event="SL_DEFENSE_PREV_SL_CANCEL_FAIL",
+                level="WARN",
+                record_id=rec_id,
+                symbol=symbol,
+                market=market,
+                side=close_side,
+                status="OPEN",
+                qty=rem_qty,
+                price=new_stop,
+                detail=str(getattr(e, "detail", "") or "cancel failed"),
+                order_id=prev_sl_oid,
+                client_order_id=prev_sl_cid,
+            )
+            raise
+    protect_info: Dict[str, Any] = {}
+    protect_err = ""
+    protect_cid = _auto_client_id("psl", user_id, record.get("id"), symbol, market, "sldf")
+    try:
+        protect_info = await _auto_place_protective_stop_order(
+            market=market,
+            symbol=symbol,
+            side=close_side,
+            stop_price=new_stop,
+            qty=rem_qty,
+            api_key=api_key,
+            api_secret=api_secret,
+            client_order_id=protect_cid,
+        )
+        await _auto_audit_log(
+            user_id=user_id,
+            event="SL_DEFENSE_SL_RECREATE_OK",
+            level="WARN",
+            record_id=rec_id,
+            symbol=symbol,
+            market=market,
+            side=close_side,
+            status="OPEN",
+            qty=rem_qty,
+            price=new_stop,
+            order_id=str(protect_info.get("order_id", "") or ""),
+            client_order_id=str(protect_info.get("client_order_id", "") or ""),
+        )
+    except HTTPException as pe:
+        protect_err = str(getattr(pe, "detail", "") or "protective stop update failed")[:180]
+        await _auto_audit_log(
+            user_id=user_id,
+            event="SL_DEFENSE_SL_RECREATE_FAIL",
+            level="ERROR",
+            record_id=rec_id,
+            symbol=symbol,
+            market=market,
+            side=close_side,
+            status="OPEN",
+            qty=rem_qty,
+            price=new_stop,
+            detail=protect_err,
+            client_order_id=protect_cid,
+        )
+        raise
+    merged_state = {
+        **old_state,
+        **new_state,
+        "side": side,
+        "remaining_qty": round(rem_qty, 8),
+        "protect_sl_order_id": str(protect_info.get("order_id", "") or ""),
+        "protect_sl_client_id": str(protect_info.get("client_order_id", "") or ""),
+        "protect_sl_type": str(protect_info.get("type", "") or ""),
+        "be_stop_price": round(new_stop, 8),
+        "last_exec_error": protect_err,
+    }
+    realized = float(new_state.get("realized_pnl_usdt", old_state.get("realized_pnl_usdt", record.get("pnl_usdt", 0.0))) or 0.0)
+    return {
+        "status": "OPEN",
+        "pnl_usdt": round(realized, 8),
+        "qty": round(rem_qty, 8),
+        "stop_loss_price": round(new_stop, 8),
         "reason": _auto_reason_pack(merged_state),
     }
 
@@ -4222,6 +4428,20 @@ async def _auto_refresh_open_records(user_id: int, sync_updates: bool = True) ->
                                 )
                                 if live_patch:
                                     patch = live_patch
+                            else:
+                                old_sl = float(cur.get("stop_loss_price", 0.0) or 0.0)
+                                new_sl = float(patch.get("stop_loss_price", old_sl) or old_sl)
+                                tol = max(1e-9, abs(old_sl) * 1e-6)
+                                if old_sl > 0 and new_sl > 0 and abs(new_sl - old_sl) > tol:
+                                    live_patch = await _auto_apply_live_stop_update(
+                                        user_id=user_id,
+                                        record=cur,
+                                        old_state=old_state,
+                                        new_state=new_state,
+                                        stop_price=new_sl,
+                                    )
+                                    if live_patch:
+                                        patch = live_patch
                         elif patch_status in {"TP", "SL", "CLOSED_FAIL"}:
                             live_patch = await _auto_apply_live_final_close(
                                 user_id=user_id,
