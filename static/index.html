@@ -201,33 +201,32 @@
                 <div class="decision-step-s" id="stepFinalStatus">-</div>
                 <div class="decision-final-v" id="decisionFinal">-</div>
               </div>
-              <div class="decision-backcheck is-pending" id="passCheckSummary">
+              <div class="decision-backcheck is-pending" id="autoRecordSummary">
                 <div class="passcheck-head">
-                  <div class="passcheck-title">최근 PASS 검증</div>
+                  <div class="passcheck-title">최근 자동매매 기록</div>
                   <div class="passcheck-head-right">
-                    <div class="passcheck-note" id="passCheckModeNote">-</div>
+                    <div class="passcheck-note" id="autoRecordModeNote">-</div>
                     <label class="passcheck-period-wrap">
-                      <span>기간</span>
-                      <select id="passCheckPeriod">
-                        <option value="24h">24h</option>
-                        <option value="3d" selected>3d</option>
-                        <option value="7d">7d</option>
+                      <span>대상</span>
+                      <select id="autoRecordTarget">
+                        <option value="__selected__" selected>현재 코인</option>
+                        <option value="__all__">전체 코인</option>
                       </select>
                     </label>
                   </div>
                 </div>
                 <div class="passcheck-metrics">
                   <div class="passcheck-item">
-                    <div class="passcheck-k">검증 구간</div>
-                    <div class="passcheck-v" id="passCheckBars">-</div>
-                  </div>
-                  <div class="passcheck-item">
-                    <div class="passcheck-k">PASS + 진입가 달성</div>
-                    <div class="passcheck-v" id="passCheckPasses">-</div>
+                    <div class="passcheck-k">거래 구간</div>
+                    <div class="passcheck-v" id="autoRecordRange">-</div>
                   </div>
                   <div class="passcheck-item passcheck-item-hit">
-                    <div class="passcheck-k">익절가 달성</div>
-                    <div class="passcheck-v" id="passCheckHitRate">-</div>
+                    <div class="passcheck-k">익절 건수</div>
+                    <div class="passcheck-v" id="autoRecordTp">-</div>
+                  </div>
+                  <div class="passcheck-item">
+                    <div class="passcheck-k">손절 건수</div>
+                    <div class="passcheck-v" id="autoRecordSl">-</div>
                   </div>
                 </div>
               </div>
@@ -327,6 +326,6 @@
       </footer>
     </div>
 
-    <script src="/static/app.js?v=20260222c"></script>
+    <script src="/static/app.js?v=20260222d"></script>
   </body>
 </html>

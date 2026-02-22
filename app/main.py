@@ -7825,6 +7825,8 @@ async def api_auto_trade_stats(
     now_ms = int(time() * 1000)
     day_start_ms = _kst_day_start_ms(now_ms)
     today_pnl = 0.0
+    first_opened_ms = 0
+    last_event_ms = 0
     by_symbol: Dict[str, Dict[str, Any]] = {}
 
     def _closed_outcome(status: str, pnl: float) -> str:
@@ -7846,7 +7848,13 @@ async def api_auto_trade_stats(
         pnl = float(r.get("pnl_usdt", 0.0) or 0.0)
         notional = float(r.get("notional_usdt", 0.0) or 0.0)
         seed = _auto_record_effective_seed_usdt(r)
+        opened_ms = int(r.get("opened_ms", 0) or 0)
         closed_ms = int(r.get("closed_ms", 0) or 0)
+        event_ms = closed_ms if closed_ms > 0 else opened_ms
+        if opened_ms > 0 and (first_opened_ms <= 0 or opened_ms < first_opened_ms):
+            first_opened_ms = opened_ms
+        if event_ms > last_event_ms:
+            last_event_ms = event_ms
         outcome = _closed_outcome(status, pnl)
         if outcome == "OPEN":
             open_cnt += 1
@@ -7877,9 +7885,15 @@ async def api_auto_trade_stats(
                 "fail": 0,
                 "realized_pnl_usdt": 0.0,
                 "win_rate": 0.0,
+                "first_opened_ms": 0,
+                "last_event_ms": 0,
             }
         a = by_symbol[sym]
         a["total"] += 1
+        if opened_ms > 0 and (int(a["first_opened_ms"]) <= 0 or opened_ms < int(a["first_opened_ms"])):
+            a["first_opened_ms"] = opened_ms
+        if event_ms > int(a["last_event_ms"]):
+            a["last_event_ms"] = event_ms
         if outcome == "OPEN":
             a["open"] += 1
         elif outcome == "TP":
@@ -7896,6 +7910,8 @@ async def api_auto_trade_stats(
         done = int(a["tp"]) + int(a["sl"]) + int(a["fail"])
         a["realized_pnl_usdt"] = round(float(a["realized_pnl_usdt"]), 4)
         a["win_rate"] = round((float(a["tp"]) / done) * 100.0, 1) if done > 0 else 0.0
+        a["first_opened_ms"] = int(a["first_opened_ms"] or 0)
+        a["last_event_ms"] = int(a["last_event_ms"] or 0)
     by_symbol_items.sort(key=lambda x: (int(x["total"]), str(x["symbol"])), reverse=True)
     done_total = tp_cnt + sl_cnt + fail_cnt
     realized_pnl_pct = (realized_pnl / realized_seed) * 100.0 if realized_seed > 0 else 0.0
@@ -7908,6 +7924,8 @@ async def api_auto_trade_stats(
             "sl": sl_cnt,
             "fail": fail_cnt,
             "win_rate": round((float(tp_cnt) / done_total) * 100.0, 1) if done_total > 0 else 0.0,
+            "first_opened_ms": int(first_opened_ms or 0),
+            "last_event_ms": int(last_event_ms or 0),
             "realized_pnl_usdt": round(realized_pnl, 4),
             "realized_basis_notional_usdt": round(realized_notional, 4),
             "realized_basis_seed_usdt": round(realized_seed, 4),
@@ -8332,20 +8350,10 @@ async def api_pass_check(
     horizon_bars: int = Query(24, ge=3, le=3000),
     entry_window_bars: int = Query(6, ge=1, le=24),
 ):
-    if interval not in ALLOWED_INTERVALS:
-        raise HTTPException(status_code=400, detail=f"interval must be one of {sorted(ALLOWED_INTERVALS)}")
-    if market not in ALLOWED_MARKETS:
-        raise HTTPException(status_code=400, detail=f"market must be one of {sorted(ALLOWED_MARKETS)}")
-    # 실시간 계산 금지: horizon을 period로 매핑해 DB 통계만 반환
-    period = _horizon_to_period(interval, int(horizon_bars))
-    payload = await api_pass_check_db(symbol=symbol, interval=interval, market=market, period=period)
-    out = dict(payload)
-    out["cached"] = True
-    out["horizon_bars"] = int(horizon_bars)
-    out["entry_window_bars"] = int(entry_window_bars)
-    out["limit"] = int(limit)
-    out["source"] = "db_only"
-    return out
+    raise HTTPException(
+        status_code=410,
+        detail="pass_check feature has been removed. use /api/auto_trade/stats and /api/auto_trade/records",
+    )
 
 
 @app.get("/api/pass_check_db")
@@ -8355,298 +8363,20 @@ async def api_pass_check_db(
     market: str = Query("spot"),
     period: str = Query("3d", pattern="^(24h|3d|7d)$"),
 ):
-    symbol_u = symbol.upper()
-    market_u = market.lower()
-    interval_u = interval if interval in ALLOWED_INTERVALS else "5m"
-    now_ms = int(time() * 1000)
-    window_days = 7
-    window_anchor_ms = now_ms
-    try:
-        baseline = await _pc_get_entry_baseline_counts(symbol_u, market_u, interval_u)
-        baseline_latest = int((baseline or {}).get("latest_signal_time_ms", 0) or 0)
-        if baseline_latest > 0:
-            window_anchor_ms = baseline_latest
-    except HTTPException:
-        pass
-    window_start_ms = max(0, window_anchor_ms - (window_days * 24 * 60 * 60 * 1000))
-    ref_flow_score = 0.0
-    ref_flow_weight = float(_AUTO_FLOW_SCORE_WEIGHT)
-    try:
-        whale_ref = await _auto_fetch_whale_sentiment(symbol=symbol_u)
-        ref_flow_score = float(whale_ref.get("flow_score", whale_ref.get("score", 0.0)) or 0.0)
-        ref_flow_weight = float(whale_ref.get("flow_weight", _AUTO_FLOW_SCORE_WEIGHT) or _AUTO_FLOW_SCORE_WEIGHT)
-    except Exception:
-        pass
-    updated_ms = now_ms
-    try:
-        summary = await _pc_get_summary(symbol_u, market_u, interval_u, period)
-        if isinstance(summary, dict):
-            updated_ms = int(summary.get("updated_ms", now_ms) or now_ms)
-    except HTTPException:
-        pass
-
-    # PASS 검증은 항상 최근 7일 고정 구간에서 집계한다.
-    rows = await _sb_request(
-        "GET",
-        "/rest/v1/pass_check_events",
-        params={
-            "select": "signal_time_ms,executed,result",
-            "symbol": f"eq.{symbol_u}",
-            "market": f"eq.{market_u}",
-            "interval": f"eq.{interval_u}",
-            "period": f"eq.{period}",
-            "signal_time_ms": f"gte.{window_start_ms}",
-            "order": "signal_time_ms.desc",
-            "limit": "100000",
-        },
+    raise HTTPException(
+        status_code=410,
+        detail="pass_check db endpoint has been removed. use /api/auto_trade/stats and /api/auto_trade/records",
     )
-    events = rows if isinstance(rows, list) else []
-    if window_anchor_ms > 0:
-        events = [e for e in events if int(e.get("signal_time_ms", 0) or 0) <= window_anchor_ms]
-    pass_cnt = len(events)
-    executed = [e for e in events if bool(e.get("executed"))]
-    executed_cnt = len(executed)
-    tp_hits = sum(1 for e in executed if str(e.get("result", "")).upper() == "TP1_HIT")
-    sl_hits = sum(1 for e in executed if str(e.get("result", "")).upper() == "SL_HIT")
-    no_hits = sum(1 for e in executed if str(e.get("result", "")).upper() == "NO_HIT")
-    no_entry = sum(1 for e in events if not bool(e.get("executed")))
-    resolved = tp_hits + sl_hits
-    payload = _build_pass_check_payload(
-        symbol=symbol_u,
-        market=market_u,
-        interval=interval_u,
-        period=period,
-        pass_count=pass_cnt,
-        executed_count=executed_cnt,
-        no_entry_count=no_entry,
-        tp1_hit_count=tp_hits,
-        sl_hit_count=sl_hits,
-        no_hit_count=no_hits,
-        resolved_count=resolved,
-        first_signal_time_ms=window_start_ms,
-        latest_signal_time_ms=window_anchor_ms,
-        updated_ms=updated_ms,
-        source="db_events_window_7d",
-        flow_score=ref_flow_score,
-        flow_weight=ref_flow_weight,
-        flow_source="current_fixed_ref",
-    )
-    return payload
 
 
 @app.post("/api/pass_check_batch")
 async def api_pass_check_batch(
     payload: Dict[str, Any] = Body(default={}),
 ):
-    market = str(payload.get("market", "spot")).lower().strip()
-    if market not in ALLOWED_MARKETS:
-        raise HTTPException(status_code=400, detail=f"market must be one of {sorted(ALLOWED_MARKETS)}")
-    symbols_in = payload.get("symbols")
-    if isinstance(symbols_in, list) and symbols_in:
-        symbols = [str(x).upper().strip() for x in symbols_in if str(x).strip()]
-    else:
-        symbols = ["BTCUSDT", "ETHUSDT", "XRPUSDT", "DOGEUSDT", "SUIUSDT", "SOLUSDT", "CROSSUSDT"]
-    interval = str(payload.get("interval", "5m"))
-    if interval not in ALLOWED_INTERVALS:
-        raise HTTPException(status_code=400, detail=f"interval must be one of {sorted(ALLOWED_INTERVALS)}")
-    periods = payload.get("periods")
-    if not isinstance(periods, list) or not periods:
-        periods = ["24h", "3d", "7d"]
-    periods = [str(p) for p in periods if str(p) in {"24h", "3d", "7d"}]
-    if not periods:
-        periods = ["24h", "3d", "7d"]
-    seed_days = int(payload.get("seed_days", 7) or 7)
-    seed_days = max(7, min(seed_days, 3660))
-    bootstrap_year = bool(payload.get("bootstrap_year", False))
-    bootstrap_signal_step = int(payload.get("bootstrap_signal_step", 12) or 12)
-    bootstrap_signal_step = max(1, min(bootstrap_signal_step, 48))
-    initial_signal_step = int(payload.get("initial_signal_step", 3) or 3)
-    initial_signal_step = max(1, min(initial_signal_step, 24))
-    use_mtf_gate = bool(payload.get("use_mtf_gate", False))
-
-    updated: List[Dict[str, Any]] = []
-    now_ms = int(time() * 1000)
-    for sym in symbols:
-        # 심볼당 캔들은 1회만 조회하고, 기간별(24h/3d/7d) 계산에 재사용한다.
-        used_market = market
-        max_horizon = max(_period_to_horizon_bars(interval, p) for p in periods)
-        base_limit = max(220 + max_horizon + 320, max_horizon + 1200)
-        try:
-            progress_probe = await _pc_get_progress(sym, used_market, interval, periods[0])
-            has_progress = bool(progress_probe and int(progress_probe.get("last_signal_time_ms", 0)) > 0)
-            limit = base_limit if has_progress else max(base_limit, _bars_for_days(interval, seed_days) + max_horizon + 260)
-            if not bootstrap_year and not has_progress:
-                # 초기 얕은 적재는 과도한 봉 조회를 제한해 응답 지연을 줄인다.
-                limit = min(base_limit, max_horizon + 900)
-            try:
-                klines = await _fetch_klines_paged_for_pass_check(
-                    symbol=sym, interval=interval, market=used_market, total_limit=limit
-                )
-            except Exception:
-                if used_market == "spot":
-                    used_market = "futures"
-                    progress_probe = await _pc_get_progress(sym, used_market, interval, periods[0])
-                    has_progress = bool(progress_probe and int(progress_probe.get("last_signal_time_ms", 0)) > 0)
-                    limit = base_limit if has_progress else max(base_limit, _bars_for_days(interval, seed_days) + max_horizon + 260)
-                    if not bootstrap_year and not has_progress:
-                        limit = min(base_limit, max_horizon + 900)
-                    klines = await _fetch_klines_paged_for_pass_check(
-                        symbol=sym, interval=interval, market=used_market, total_limit=limit
-                    )
-                else:
-                    raise
-        except Exception as e:
-            for period in periods:
-                updated.append(
-                    {
-                        "symbol": sym,
-                        "market": used_market,
-                        "interval": interval,
-                        "period": period,
-                        "new_events": 0,
-                        "from_signal_time_ms": 0,
-                        "seed_days": int(seed_days),
-                        "bootstrap_year": bool(bootstrap_year),
-                        "bootstrap_signal_step": 0,
-                        "flow_score": 0.0,
-                        "flow_weight": round(float(_AUTO_FLOW_SCORE_WEIGHT), 4),
-                        "error": f"symbol_init_failed:{type(e).__name__}",
-                    }
-                )
-            _compact_runtime_memory()
-            continue
-        df = _klines_to_df(klines)
-        pass_flow_score = 0.0
-        pass_flow_weight = float(_AUTO_FLOW_SCORE_WEIGHT)
-        try:
-            whale_ctx = await _auto_fetch_whale_sentiment(symbol=sym)
-            pass_flow_score = float(whale_ctx.get("flow_score", whale_ctx.get("score", 0.0)) or 0.0)
-            pass_flow_weight = float(whale_ctx.get("flow_weight", _AUTO_FLOW_SCORE_WEIGHT) or _AUTO_FLOW_SCORE_WEIGHT)
-        except Exception:
-            pass
-
-        for period in periods:
-            try:
-                horizon_bars = _period_to_horizon_bars(interval, period)
-                progress = await _pc_get_progress(sym, used_market, interval, period)
-                last_signal_ms = int(progress.get("last_signal_time_ms", 0)) if progress else 0
-                if bootstrap_year and last_signal_ms <= 0:
-                    signal_step = bootstrap_signal_step
-                elif (not bootstrap_year) and last_signal_ms <= 0 and interval == "5m":
-                    signal_step = initial_signal_step
-                else:
-                    signal_step = 1
-                calc = _calc_pass_check_from_df(
-                    df=df,
-                    symbol=sym,
-                    market=used_market,
-                    interval=interval,
-                    horizon_bars=horizon_bars,
-                    signal_horizon_bars=max_horizon,
-                    entry_window_bars=5,
-                    min_signal_time_ms=last_signal_ms,
-                    signal_step=signal_step,
-                    use_mtf_gate=use_mtf_gate,
-                    use_volume_filter=True,
-                    use_reaction_entry=True,
-                    flow_score=pass_flow_score,
-                    flow_weight=pass_flow_weight,
-                )
-                events = calc.get("events", [])
-                max_signal_ms = max(last_signal_ms, int(calc.get("scan_last_signal_time_ms", 0) or 0))
-                if events:
-                    body = []
-                    for e in events:
-                        stm = int(e.get("signal_time_ms", 0) or 0)
-                        if stm <= 0:
-                            continue
-                        max_signal_ms = max(max_signal_ms, stm)
-                        body.append(
-                            {
-                                "symbol": sym,
-                                "market": used_market,
-                                "interval": interval,
-                                "period": period,
-                                "signal_time_ms": stm,
-                                "entry_time_ms": e.get("entry_time_ms"),
-                                "executed": bool(e.get("executed")),
-                                "result": str(e.get("result", "NO_ENTRY")),
-                                "side": str(e.get("side", "WAIT")),
-                                "entry_price": float(e.get("entry", 0.0) or 0.0),
-                                "tp_price": float(e.get("tp1", 0.0) or 0.0),
-                                "stop_price": float(e.get("stop", 0.0) or 0.0),
-                                "created_ms": now_ms,
-                            }
-                        )
-                    if body:
-                        await _sb_request("POST", "/rest/v1/pass_check_events", json_body=body)
-                if max_signal_ms > 0 and max_signal_ms > last_signal_ms:
-                    if progress:
-                        await _sb_request(
-                            "PATCH",
-                            "/rest/v1/pass_check_progress",
-                            params={"id": f"eq.{progress.get('id')}"},
-                            json_body={"last_signal_time_ms": max_signal_ms, "updated_ms": now_ms},
-                        )
-                    else:
-                        await _sb_request(
-                            "POST",
-                            "/rest/v1/pass_check_progress",
-                            json_body=[
-                                {
-                                    "symbol": sym,
-                                    "market": used_market,
-                                    "interval": interval,
-                                    "period": period,
-                                    "last_signal_time_ms": max_signal_ms,
-                                    "updated_ms": now_ms,
-                                }
-                            ],
-                        )
-                # summary는 이벤트 원본 기준으로 매번 재집계(드리프트 방지)
-                try:
-                    await _pc_refresh_summary_from_events(sym, used_market, interval, period)
-                except HTTPException:
-                    pass
-                updated.append(
-                    {
-                        "symbol": sym,
-                        "market": used_market,
-                        "interval": interval,
-                        "period": period,
-                        "new_events": int(len(events)),
-                        "from_signal_time_ms": int(last_signal_ms),
-                        "seed_days": int(seed_days),
-                        "bootstrap_year": bool(bootstrap_year),
-                        "bootstrap_signal_step": int(signal_step),
-                        "flow_score": round(float(pass_flow_score), 4),
-                        "flow_weight": round(float(pass_flow_weight), 4),
-                    }
-                )
-            except Exception as e:
-                updated.append(
-                    {
-                        "symbol": sym,
-                        "market": used_market,
-                        "interval": interval,
-                        "period": period,
-                        "new_events": 0,
-                        "from_signal_time_ms": 0,
-                        "seed_days": int(seed_days),
-                        "bootstrap_year": bool(bootstrap_year),
-                        "bootstrap_signal_step": 0,
-                        "flow_score": round(float(pass_flow_score), 4),
-                        "flow_weight": round(float(pass_flow_weight), 4),
-                        "error": f"period_failed:{type(e).__name__}",
-                    }
-                )
-                continue
-        # 심볼 단위 계산 완료 시 큰 객체 해제 후 메모리 반환 시도
-        del klines
-        del df
-        _compact_runtime_memory()
-    _compact_runtime_memory()
-    return {"ok": True, "updated": updated}
+    raise HTTPException(
+        status_code=410,
+        detail="pass_check batch has been removed. use /api/auto_trade/stats and /api/auto_trade/records",
+    )
 
 
 @app.get("/api/pass_check_tune")
@@ -8656,98 +8386,10 @@ async def api_pass_check_tune(
     market: str = Query("spot"),
     limit: int = Query(700, ge=220, le=1500),
 ):
-    now_ts = time()
-    _trim_ttl_cache(_PASS_TUNE_CACHE, now_ts=now_ts, ttl_s=1800.0)
-    _trim_ttl_cache(_PASS_TUNE_PROFILE_CACHE, now_ts=now_ts, ttl_s=1800.0)
-    symbol_u = symbol.upper()
-    profile = _symbol_profile(symbol_u)
-    cache_key = f"{symbol_u}:{market}:{interval}:{limit}"
-    profile_key = f"{profile}:{market}:{interval}:{limit}"
-    ttl_s = 600.0
-
-    cached_exact = _PASS_TUNE_CACHE.get(cache_key)
-    if isinstance(cached_exact, dict) and (now_ts - float(cached_exact.get("ts", 0.0)) <= ttl_s):
-        payload = dict(cached_exact.get("payload", {}))
-        payload["cached"] = "symbol"
-        return payload
-
-    # 과도한 연산을 피하기 위해 소형 그리드만 탐색
-    base_grid = [
-        {"horizon_bars": 18, "entry_window_bars": 4},
-        {"horizon_bars": 18, "entry_window_bars": 6},
-        {"horizon_bars": 24, "entry_window_bars": 4},
-        {"horizon_bars": 24, "entry_window_bars": 6},
-        {"horizon_bars": 30, "entry_window_bars": 6},
-        {"horizon_bars": 30, "entry_window_bars": 8},
-    ]
-    grid = list(base_grid)
-    grid_mode = "full"
-    profile_hint = _PASS_TUNE_PROFILE_CACHE.get(profile_key)
-    if isinstance(profile_hint, dict) and (now_ts - float(profile_hint.get("ts", 0.0)) <= ttl_s):
-        b = profile_hint.get("best") or {}
-        h = int(b.get("horizon_bars", 24))
-        e = int(b.get("entry_window_bars", 6))
-        near = [
-            {"horizon_bars": max(12, min(36, h - 6)), "entry_window_bars": max(2, min(12, e))},
-            {"horizon_bars": h, "entry_window_bars": e},
-            {"horizon_bars": h, "entry_window_bars": max(2, min(12, e + 2))},
-            {"horizon_bars": min(36, h + 6), "entry_window_bars": e},
-        ]
-        # 중복 제거
-        uniq = {(x["horizon_bars"], x["entry_window_bars"]): x for x in near}
-        grid = list(uniq.values())
-        grid_mode = "profile_hint"
-
-    results: List[Dict[str, Any]] = []
-    for g in grid:
-        period = _horizon_to_period(interval, int(g["horizon_bars"]))
-        r = await api_pass_check_db(symbol=symbol_u, interval=interval, market=market, period=period)
-        executed = int(r.get("executed_count", 0))
-        signal_rate = float(r.get("tp1_hit_rate", 0.0))
-        exec_rate = float(r.get("executed_tp1_hit_rate", 0.0))
-        resolved_rate = float(r.get("resolved_tp1_hit_rate", 0.0))
-        # 체결 수가 너무 적은 조합은 점수를 낮춤
-        sample_penalty = 0.0 if executed >= 40 else (40 - executed) * 0.004
-        score = (exec_rate * 0.55) + (resolved_rate * 0.35) + (signal_rate * 0.10) - sample_penalty
-        results.append(
-            {
-                "horizon_bars": g["horizon_bars"],
-                "entry_window_bars": g["entry_window_bars"],
-                "score": round(score, 6),
-                "pass_count": r.get("pass_count", 0),
-                "executed_count": executed,
-                "tp1_hit_rate": signal_rate,
-                "executed_tp1_hit_rate": exec_rate,
-                "resolved_tp1_hit_rate": resolved_rate,
-            }
-        )
-    results.sort(key=lambda x: (x["score"], x["executed_count"]), reverse=True)
-    best = results[0] if results else None
-    payload = {
-        "symbol": symbol_u,
-        "interval": interval,
-        "market": market,
-        "limit": limit,
-        "profile": profile,
-        "grid_mode": grid_mode,
-        "best": best,
-        "candidates": results,
-        "cached": "none",
-    }
-    _set_bounded_cache(
-        _PASS_TUNE_CACHE,
-        cache_key,
-        {"ts": now_ts, "payload": payload},
-        max_entries=_PASS_TUNE_CACHE_MAX,
+    raise HTTPException(
+        status_code=410,
+        detail="pass_check tune has been removed. use /api/auto_trade/stats and /api/auto_trade/records",
     )
-    if best is not None:
-        _set_bounded_cache(
-            _PASS_TUNE_PROFILE_CACHE,
-            profile_key,
-            {"ts": now_ts, "best": best},
-            max_entries=_PASS_TUNE_PROFILE_CACHE_MAX,
-        )
-    return payload
 
 
 @app.websocket("/ws/analysis")

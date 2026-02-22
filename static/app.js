@@ -78,12 +78,12 @@ const stepExecStatusEl = document.getElementById("stepExecStatus");
 const stepExecDetailEl = document.getElementById("stepExecDetail");
 const stepFinalStatusEl = document.getElementById("stepFinalStatus");
 const decisionFinalEl = document.getElementById("decisionFinal");
-const passCheckSummaryEl = document.getElementById("passCheckSummary");
-const passCheckPeriodEl = document.getElementById("passCheckPeriod");
-const passCheckModeNoteEl = document.getElementById("passCheckModeNote");
-const passCheckBarsEl = document.getElementById("passCheckBars");
-const passCheckPassesEl = document.getElementById("passCheckPasses");
-const passCheckHitRateEl = document.getElementById("passCheckHitRate");
+const autoRecordSummaryEl = document.getElementById("autoRecordSummary");
+const autoRecordTargetEl = document.getElementById("autoRecordTarget");
+const autoRecordModeNoteEl = document.getElementById("autoRecordModeNote");
+const autoRecordRangeEl = document.getElementById("autoRecordRange");
+const autoRecordTpEl = document.getElementById("autoRecordTp");
+const autoRecordSlEl = document.getElementById("autoRecordSl");
 const entrySwingBadgeEl = document.getElementById("entrySwingBadge");
 const coinSideStickyEl = document.querySelector(".coin-side-sticky");
 const coinSidePanelEl = document.querySelector(".coin-side");
@@ -332,87 +332,99 @@ function resetAnalysisUI(note = "코인 변경: 계산 중...") {
   if (asofEl) asofEl.textContent = note;
 }
 
-function setPassCheckUI(state, payload = {}) {
-  if (!passCheckSummaryEl) return;
-  passCheckSummaryEl.classList.remove("is-pending", "is-good", "is-mid", "is-low", "is-error");
-  passCheckSummaryEl.classList.add(
+function setAutoRecordSummaryUI(state, payload = {}) {
+  if (!autoRecordSummaryEl) return;
+  autoRecordSummaryEl.classList.remove("is-pending", "is-good", "is-mid", "is-low", "is-error");
+  autoRecordSummaryEl.classList.add(
     state === "success"
-      ? payload.hitRate >= 55
+      ? payload.winRate >= 55
         ? "is-good"
-        : payload.hitRate >= 40
+        : payload.winRate >= 40
           ? "is-mid"
           : "is-low"
       : state === "error"
         ? "is-error"
         : "is-pending"
   );
-  if (passCheckModeNoteEl) passCheckModeNoteEl.textContent = payload.modeNote || "-";
-  if (passCheckBarsEl) passCheckBarsEl.textContent = payload.barsText || "-";
-  if (passCheckPassesEl) passCheckPassesEl.textContent = payload.passesText || "-";
-  if (passCheckHitRateEl) passCheckHitRateEl.textContent = payload.hitRateText || "-";
+  if (autoRecordModeNoteEl) autoRecordModeNoteEl.textContent = payload.modeNote || "-";
+  if (autoRecordRangeEl) autoRecordRangeEl.textContent = payload.rangeText || "-";
+  if (autoRecordTpEl) autoRecordTpEl.textContent = payload.tpText || "-";
+  if (autoRecordSlEl) autoRecordSlEl.textContent = payload.slText || "-";
 }
 
-function resetPassCheckUI(note = "코인 변경: 계산 대기") {
-  passCheckKey = "";
-  passCheckTs = 0;
-  if (passCheckTimer) {
-    clearTimeout(passCheckTimer);
-    passCheckTimer = null;
+function resetAutoRecordSummaryUI(note = "코인 변경: 자동매매 기록 대기") {
+  autoRecordSummaryKey = "";
+  autoRecordSummaryTs = 0;
+  if (autoRecordSummaryTimer) {
+    clearTimeout(autoRecordSummaryTimer);
+    autoRecordSummaryTimer = null;
   }
-  if (activePassCheckController) {
+  if (activeAutoRecordController) {
     try {
-      activePassCheckController.abort();
+      activeAutoRecordController.abort();
     } catch (_) {}
-    activePassCheckController = null;
+    activeAutoRecordController = null;
   }
-  setPassCheckUI("pending", {
+  setAutoRecordSummaryUI("pending", {
     modeNote: note,
-    barsText: "-",
-    passesText: "-",
-    hitRateText: "-",
+    rangeText: "-",
+    tpText: "-",
+    slText: "-",
   });
 }
 
-function getPassCheckPeriodConfig(interval, periodValue) {
-  const p = String(periodValue || "3d");
-  const mapByInterval = {
-    "5m": { "24h": 288, "3d": 864, "7d": 2016 },
-    "1h": { "24h": 24, "3d": 72, "7d": 168 },
-    "4h": { "24h": 6, "3d": 18, "7d": 42 },
-  };
-  const bars = (mapByInterval[interval] && mapByInterval[interval][p]) || 72;
-  // horizon이 길수록 과거 표본 버퍼를 크게 확보해야 0% 고정 현상을 줄일 수 있음
-  const sampleBufferByPeriod = { "24h": 700, "3d": 1100, "7d": 1800 };
-  const sampleBuffer = sampleBufferByPeriod[p] || 1100;
-  return { period: p, horizonBars: bars, sampleBuffer };
+function autoRecordTargetValue() {
+  const raw = String(autoRecordTargetEl?.value || AUTO_RECORD_TARGET_SELECTED);
+  if (raw === AUTO_RECORD_TARGET_ALL || raw === AUTO_RECORD_TARGET_SELECTED) return raw;
+  return String(raw || "").toUpperCase();
 }
 
-function loadPassCheckCache() {
-  try {
-    const raw = localStorage.getItem(PASS_CHECK_CACHE_KEY);
-    if (!raw) return {};
-    const obj = JSON.parse(raw);
-    return obj && typeof obj === "object" ? obj : {};
-  } catch (_) {
-    return {};
-  }
+function autoRecordResolvedSymbol() {
+  const target = autoRecordTargetValue();
+  if (target === AUTO_RECORD_TARGET_ALL) return "";
+  if (target === AUTO_RECORD_TARGET_SELECTED) return String(selectedSymbol || "").toUpperCase();
+  return target;
 }
 
-function savePassCheckCache(cacheObj) {
-  try {
-    localStorage.setItem(PASS_CHECK_CACHE_KEY, JSON.stringify(cacheObj || {}));
-  } catch (_) {}
+function updateAutoRecordTargetOptions(bySymbolItems = []) {
+  if (!autoRecordTargetEl) return;
+  const pending = String(autoRecordTargetEl.dataset.pendingTarget || "").toUpperCase();
+  const prev = pending || autoRecordTargetValue();
+  const currentSymbol = String(selectedSymbol || "").toUpperCase();
+  const extraSymbols = Array.from(
+    new Set(
+      (Array.isArray(bySymbolItems) ? bySymbolItems : [])
+        .map((r) => String(r?.symbol || "").toUpperCase())
+        .filter((s) => Boolean(s) && s !== currentSymbol)
+    )
+  ).sort();
+  const options = [
+    { value: AUTO_RECORD_TARGET_SELECTED, label: `현재 코인 (${currentSymbol || "-"})` },
+    { value: AUTO_RECORD_TARGET_ALL, label: "전체 코인" },
+    ...extraSymbols.map((sym) => ({ value: sym, label: sym })),
+  ];
+  autoRecordTargetEl.innerHTML = options.map((o) => `<option value="${o.value}">${o.label}</option>`).join("");
+  const valid = new Set(options.map((o) => o.value));
+  autoRecordTargetEl.value = valid.has(prev) ? prev : AUTO_RECORD_TARGET_SELECTED;
+  autoRecordTargetEl.dataset.pendingTarget = "";
 }
 
-function trimPassCheckCache(cacheObj, maxKeys = 72) {
-  if (!cacheObj || typeof cacheObj !== "object") return {};
-  const keys = Object.keys(cacheObj);
-  if (keys.length <= maxKeys) return cacheObj;
-  const dropCount = keys.length - maxKeys;
-  for (let i = 0; i < dropCount; i += 1) {
-    delete cacheObj[keys[i]];
-  }
-  return cacheObj;
+function fmtYmdHm(ms) {
+  const n = Number(ms || 0);
+  if (!Number.isFinite(n) || n <= 0) return "-";
+  const d = new Date(n);
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  return `${fmtYmd(n)} ${hh}:${mm}`;
+}
+
+function buildAutoRecordRangeText(startMs, endMs) {
+  const start = Number(startMs || 0);
+  const end = Number(endMs || 0);
+  if (start > 0 && end > 0) return `${fmtYmdHm(start)} ~ ${fmtYmdHm(end)}`;
+  if (start > 0) return `${fmtYmdHm(start)} ~`;
+  if (end > 0) return `~ ${fmtYmdHm(end)}`;
+  return "거래 없음";
 }
 
 function renderProbAsset() {
@@ -470,13 +482,13 @@ let lastOverlayFibPlan = null;
 let lastSingleAnalysisInterval = "5m";
 let analysisSnapshotRaw = null;
 let analysisSnapshotKey = "";
-let passCheckTs = 0;
-let passCheckKey = "";
+let autoRecordSummaryTs = 0;
+let autoRecordSummaryKey = "";
 let activeLoadController = null;
 let activeLoadSeq = 0;
-let activePassCheckController = null;
-let activePassCheckSeq = 0;
-let passCheckTimer = null;
+let activeAutoRecordController = null;
+let activeAutoRecordSeq = 0;
+let autoRecordSummaryTimer = null;
 let autoTickBusy = false;
 let autoConfigReady = false;
 
@@ -520,7 +532,8 @@ const COINS = [
 ];
 
 const UI_STATE_KEY = "coin.ui.state.v1";
-const PASS_CHECK_CACHE_KEY = "coin.passcheck.cache.v1";
+const AUTO_RECORD_TARGET_SELECTED = "__selected__";
+const AUTO_RECORD_TARGET_ALL = "__all__";
 const ALLOWED_ANALYSIS_INTERVALS = new Set(["5m", "1h", "4h"]);
 
 function normalizeAnalysisInterval(v) {
@@ -538,7 +551,7 @@ function saveUiState() {
       analysisMode,
       analysisInterval: analysisMode === "mtf" ? "" : normalizeAnalysisInterval(analysisInterval),
       chartInterval: chartIntervalEl ? chartIntervalEl.value : "5m",
-      passCheckPeriod: passCheckPeriodEl ? passCheckPeriodEl.value : "3d",
+      autoRecordTarget: autoRecordTargetEl ? autoRecordTargetEl.value : AUTO_RECORD_TARGET_SELECTED,
       fibToggle: fibToggleEl ? Boolean(fibToggleEl.checked) : true,
       avwapToggle: avwapToggleEl ? Boolean(avwapToggleEl.checked) : true,
       vpToggle: vpToggleEl ? Boolean(vpToggleEl.checked) : true,
@@ -576,8 +589,13 @@ function restoreUiState() {
     if (chartIntervalEl && hasOption(chartIntervalEl, state?.chartInterval)) {
       chartIntervalEl.value = String(state.chartInterval);
     }
-    if (passCheckPeriodEl && hasOption(passCheckPeriodEl, state?.passCheckPeriod)) {
-      passCheckPeriodEl.value = String(state.passCheckPeriod);
+    if (autoRecordTargetEl) {
+      const target = String(state?.autoRecordTarget || AUTO_RECORD_TARGET_SELECTED);
+      if (target === AUTO_RECORD_TARGET_ALL || target === AUTO_RECORD_TARGET_SELECTED || hasOption(autoRecordTargetEl, target)) {
+        autoRecordTargetEl.value = target;
+      } else if (target) {
+        autoRecordTargetEl.dataset.pendingTarget = target.toUpperCase();
+      }
     }
     if (fibToggleEl && typeof state?.fibToggle === "boolean") fibToggleEl.checked = state.fibToggle;
     if (avwapToggleEl && typeof state?.avwapToggle === "boolean") avwapToggleEl.checked = state.avwapToggle;
@@ -1043,7 +1061,7 @@ function handleSelectCoin(symbol, market) {
   coinSwitchTimer = setTimeout(() => {
     if (reqSeq !== coinSwitchSeq) return;
     resetAnalysisUI("코인 변경: 계산 중...");
-    resetPassCheckUI("코인 변경: 계산 중...");
+    resetAutoRecordSummaryUI("코인 변경: 자동매매 기록 불러오는 중...");
     syncSimSymbolWithSelected();
     fillSimEntryWithCurrentPrice();
     loadSimTrades().catch(() => {});
@@ -2449,7 +2467,9 @@ function renderActionSummary(analysis, fibPlan) {
     stepFinalStatusEl.classList.remove("is-pass", "is-wait");
   }
   if (decisionFinalEl && !fibPlan) decisionFinalEl.textContent = "데이터 대기";
-  if (passCheckSummaryEl && !fibPlan) setPassCheckUI("pending");
+  if (autoRecordSummaryEl && !fibPlan) {
+    setAutoRecordSummaryUI("pending", { modeNote: "자동매매 기록 불러오는 중..." });
+  }
   if (actionExplainEl) {
     const setupTxt = reversalOverride
       ? "반전 바닥 롱"
@@ -2966,98 +2986,100 @@ async function fetchJSON(url, options = {}) {
   return res.json();
 }
 
-async function loadPassCheck(symbol, market, analysisMode, analysisInterval) {
-  if (!passCheckSummaryEl) return;
-  const interval = analysisMode === "mtf" ? "5m" : normalizeAnalysisInterval(analysisInterval);
-  const periodValue = passCheckPeriodEl ? passCheckPeriodEl.value : "3d";
-  const periodCfg = getPassCheckPeriodConfig(interval, periodValue);
-  const horizonBars = periodCfg.horizonBars;
-  const limitBars = Math.max(700, Math.min(5000, horizonBars + periodCfg.sampleBuffer));
-  const key = `${symbol}:${market}:${analysisMode}:${interval}:${periodCfg.period}`;
+function buildAutoRecordSummaryPayload(stats, bySymbolItems) {
+  const target = autoRecordTargetValue();
+  const symbol = autoRecordResolvedSymbol();
+  const rows = Array.isArray(bySymbolItems) ? bySymbolItems : [];
+  let scopeLabel = target === AUTO_RECORD_TARGET_ALL ? "전체 코인" : symbol || "-";
+  let total = 0;
+  let tp = 0;
+  let sl = 0;
+  let fail = 0;
+  let winRate = 0.0;
+  let firstOpenedMs = 0;
+  let lastEventMs = 0;
+  if (target === AUTO_RECORD_TARGET_ALL) {
+    total = Number(stats?.total || 0);
+    tp = Number(stats?.tp || 0);
+    sl = Number(stats?.sl || 0);
+    fail = Number(stats?.fail || 0);
+    winRate = Number(stats?.win_rate || 0);
+    firstOpenedMs = Number(stats?.first_opened_ms || 0);
+    lastEventMs = Number(stats?.last_event_ms || 0);
+  } else {
+    const row = rows.find((r) => String(r?.symbol || "").toUpperCase() === symbol);
+    if (row) {
+      total = Number(row.total || 0);
+      tp = Number(row.tp || 0);
+      sl = Number(row.sl || 0);
+      fail = Number(row.fail || 0);
+      winRate = Number(row.win_rate || 0);
+      firstOpenedMs = Number(row.first_opened_ms || 0);
+      lastEventMs = Number(row.last_event_ms || 0);
+    }
+    if (!scopeLabel || scopeLabel === "-") scopeLabel = "현재 코인";
+  }
+  const done = tp + sl + fail;
+  const hasTrades = total > 0;
+  let modeNote = `${scopeLabel} · 총 ${total}건 / 종료 ${done}건 / 승률 ${winRate.toFixed(1)}%`;
+  if (fail > 0) modeNote += ` / 기타 ${fail}건`;
+  if (!hasTrades) modeNote = `${scopeLabel} · 아직 자동매매 기록이 없습니다.`;
+  return {
+    hasTrades,
+    winRate,
+    modeNote,
+    rangeText: buildAutoRecordRangeText(firstOpenedMs, lastEventMs),
+    tpText: `${tp}건`,
+    slText: `${sl}건`,
+  };
+}
+
+async function loadAutoRecordSummary(force = false) {
+  if (!autoRecordSummaryEl) return;
+  const target = autoRecordTargetValue();
+  const key = `${selectedSymbol}:${selectedMarket}:${target}`;
   const now = Date.now();
-  const uiCache = loadPassCheckCache();
-  // 코인 전환 시 이전 코인 값이 잠깐 보이는 현상을 막기 위해,
-  // 캐시 선노출 없이 DB 응답만 반영한다.
-  setPassCheckUI("pending", { modeNote: "DB 통계 불러오는 중..." });
-  if (key === passCheckKey && now - passCheckTs < 20000) return;
-  if (activePassCheckController) {
+  if (!force && key === autoRecordSummaryKey && now - autoRecordSummaryTs < 12000) return;
+  setAutoRecordSummaryUI("pending", { modeNote: "자동매매 통계 불러오는 중..." });
+  if (activeAutoRecordController) {
     try {
-      activePassCheckController.abort();
+      activeAutoRecordController.abort();
     } catch (_) {}
   }
   const controller = new AbortController();
-  activePassCheckController = controller;
-  const reqSeq = ++activePassCheckSeq;
-  passCheckKey = key;
-  passCheckTs = now;
+  activeAutoRecordController = controller;
+  const reqSeq = ++activeAutoRecordSeq;
+  autoRecordSummaryKey = key;
+  autoRecordSummaryTs = now;
   try {
-    const data = await fetchJSON(
-      `/api/pass_check_db?symbol=${encodeURIComponent(symbol)}&market=${encodeURIComponent(market)}&interval=${encodeURIComponent(
-        interval
-      )}&period=${encodeURIComponent(periodCfg.period)}`,
-      { signal: controller.signal }
-    );
-    if (controller.signal.aborted || reqSeq !== activePassCheckSeq) return;
-    if (!data) {
-      setPassCheckUI("pending", {
-        modeNote: "DB 누적 준비중",
-        barsText: "-",
-        passesText: "-",
-        hitRateText: "-",
-      });
-      return;
-    }
-    const executedCnt = Number(data?.executed_count || 0);
-    const hitCnt = Number(data?.tp1_hit_count || 0);
-    const hitRate = Number(data?.executed_tp1_hit_rate || 0) * 100;
-    const bars = Number(data?.bars || 0);
-    const firstSignalMs = Number(data?.first_signal_time_ms || 0);
-    const latestSignalMs = Number(data?.latest_signal_time_ms || 0);
-    const updatedMs = Number(data?.updated_ms || 0);
-    // 검증구간은 DB에 적재된 실제 신호 범위(최초~최신)로 표기한다.
-    const endMs = latestSignalMs > 0 ? latestSignalMs : updatedMs;
-    const startMs = firstSignalMs > 0 ? firstSignalMs : 0;
-    const rangeText = startMs > 0 && endMs > 0 ? `${fmtYmd(startMs)} ~ ${fmtYmd(endMs)}` : bars > 0 ? `최근 ${bars}봉 (${interval})` : "-";
-    const periodLabel = periodCfg.period === "24h" ? "24시간" : periodCfg.period === "7d" ? "7일" : "3일";
-    const modeNote = analysisMode === "mtf" ? `MTF(5m) · ${periodLabel} 내 TP1 달성 집계` : `${interval} · ${periodLabel} 내 TP1 달성 집계`;
-    const nextPayload = {
-      modeNote,
-      barsText: rangeText,
-      passesText: `${executedCnt}회`,
-      hitRate: hitRate,
-      hitRateText: `${hitCnt}회 (${hitRate.toFixed(1)}%)`,
-    };
-    if (Number(data?.pass_count || 0) <= 0) {
-      nextPayload.modeNote = `${modeNote} · PASS 0건`;
-      nextPayload.passesText = "0회";
-      nextPayload.hitRate = 0;
-      nextPayload.hitRateText = "0회 (0.0%)";
-    }
-    setPassCheckUI("success", nextPayload);
-    uiCache[key] = nextPayload;
-    savePassCheckCache(trimPassCheckCache(uiCache));
+    const data = await fetchJSON("/api/auto_trade/stats?sync=0", { signal: controller.signal });
+    if (controller.signal.aborted || reqSeq !== activeAutoRecordSeq) return;
+    const bySymbol = Array.isArray(data?.by_symbol) ? data.by_symbol : [];
+    updateAutoRecordTargetOptions(bySymbol);
+    const payload = buildAutoRecordSummaryPayload(data?.stats || {}, bySymbol);
+    setAutoRecordSummaryUI(payload.hasTrades ? "success" : "pending", payload);
   } catch (e) {
     if (e?.name === "AbortError") return;
-    setPassCheckUI("error", {
-      modeNote: "계산 실패",
-      barsText: "-",
-      passesText: "-",
-      hitRateText: "-",
+    setAutoRecordSummaryUI("error", {
+      modeNote: "자동매매 통계 조회 실패",
+      rangeText: "-",
+      tpText: "-",
+      slText: "-",
     });
   } finally {
-    if (activePassCheckController === controller) activePassCheckController = null;
+    if (activeAutoRecordController === controller) activeAutoRecordController = null;
   }
 }
 
-function schedulePassCheck(symbol, market, analysisMode, analysisInterval) {
-  if (passCheckTimer) {
-    clearTimeout(passCheckTimer);
-    passCheckTimer = null;
+function scheduleAutoRecordSummary(force = false) {
+  if (autoRecordSummaryTimer) {
+    clearTimeout(autoRecordSummaryTimer);
+    autoRecordSummaryTimer = null;
   }
-  passCheckTimer = setTimeout(() => {
-    passCheckTimer = null;
-    loadPassCheck(symbol, market, analysisMode, analysisInterval);
-  }, 450);
+  autoRecordSummaryTimer = setTimeout(() => {
+    autoRecordSummaryTimer = null;
+    loadAutoRecordSummary(force).catch(() => {});
+  }, 300);
 }
 
 async function load(options = {}) {
@@ -3179,7 +3201,7 @@ async function load(options = {}) {
     renderAnalysisOnly(analysis, analysisMode, market);
     renderFibPrices(decisionFibPlan);
     renderActionSummary(analysis, decisionFibPlan);
-    schedulePassCheck(symbol, market, analysisMode, analysisInterval);
+    scheduleAutoRecordSummary();
     scheduleSidebarPinUpdate();
 
     applyFibOverlay();
@@ -3273,29 +3295,27 @@ if (analysisIntervalEl)
   analysisIntervalEl.addEventListener("change", () => {
     if (analysisIntervalEl.value) lastSingleAnalysisInterval = analysisIntervalEl.value;
     saveUiState();
-    resetPassCheckUI("조건 변경: 계산 중...");
+    resetAutoRecordSummaryUI("조건 변경: 자동매매 기록 불러오는 중...");
     load().catch((e) => alert(e.message));
   });
 if (analysisModeEl)
   analysisModeEl.addEventListener("change", () => {
     syncAnalysisControls();
     saveUiState();
-    resetPassCheckUI("조건 변경: 계산 중...");
+    resetAutoRecordSummaryUI("조건 변경: 자동매매 기록 불러오는 중...");
     load().catch((e) => alert(e.message));
   });
 if (chartIntervalEl)
   chartIntervalEl.addEventListener("change", () => {
     saveUiState();
-    resetPassCheckUI("조건 변경: 계산 중...");
+    resetAutoRecordSummaryUI("조건 변경: 자동매매 기록 불러오는 중...");
     load().catch((e) => alert(e.message));
   });
-if (passCheckPeriodEl)
-  passCheckPeriodEl.addEventListener("change", () => {
+if (autoRecordTargetEl)
+  autoRecordTargetEl.addEventListener("change", () => {
     saveUiState();
-    resetPassCheckUI("기간 변경: 계산 중...");
-    loadPassCheck(selectedSymbol, selectedMarket, analysisModeEl ? analysisModeEl.value : "single", analysisIntervalEl ? analysisIntervalEl.value : "5m").catch(
-      () => {}
-    );
+    resetAutoRecordSummaryUI("대상 변경: 자동매매 기록 불러오는 중...");
+    loadAutoRecordSummary(true).catch(() => {});
   });
 if (fibToggleEl)
   fibToggleEl.addEventListener("change", () => {

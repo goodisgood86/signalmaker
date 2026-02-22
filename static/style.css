@@ -1269,7 +1269,7 @@ button:hover {
 
 .passcheck-period-wrap select {
   height: 24px;
-  min-width: 62px;
+  min-width: 108px;
   border-radius: 8px;
   border: 1px solid rgba(180, 206, 255, 0.24);
   background: rgba(255, 255, 255, 0.07);
