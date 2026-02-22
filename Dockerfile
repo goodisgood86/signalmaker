@@ -13,7 +13,7 @@ COPY app /app/app
 COPY static /app/static
 COPY artifacts/models /app/artifacts/models
 COPY scripts /app/scripts
-RUN chmod +x /app/scripts/*.sh
+RUN if ls /app/scripts/*.sh >/dev/null 2>&1; then chmod +x /app/scripts/*.sh; fi
 
 RUN mkdir -p /app/backups/pass_check
 
