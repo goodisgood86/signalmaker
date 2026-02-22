@@ -262,8 +262,39 @@ function setTickStatusFromResponse(data) {
   setCfgStatus("");
 }
 
-function statusMeta(status) {
-  const s = String(status || "").toUpperCase();
+function outcomeByPrice(row) {
+  const s = String(row?.status || "").toUpperCase();
+  if (s !== "TP" && s !== "SL") return s;
+  const entry = Number(row?.entry_price);
+  const close = Number(row?.close_price);
+  let side = String(row?.side || "").toUpperCase();
+  if (side !== "BUY" && side !== "SELL") {
+    const tp = Number(row?.take_profit_price);
+    const sl = Number(row?.stop_loss_price);
+    if (Number.isFinite(entry) && Number.isFinite(tp) && Number.isFinite(sl)) {
+      if (tp > entry && sl < entry) side = "BUY";
+      else if (tp < entry && sl > entry) side = "SELL";
+    }
+  }
+  if (Number.isFinite(entry) && Number.isFinite(close) && close > 0) {
+    if (side === "SELL") {
+      if (close < entry) return "TP";
+      if (close > entry) return "SL";
+    } else if (side === "BUY") {
+      if (close > entry) return "TP";
+      if (close < entry) return "SL";
+    }
+  }
+  const pnl = Number(row?.pnl_usdt);
+  if (Number.isFinite(pnl)) {
+    if (pnl > 0) return "TP";
+    if (pnl < 0) return "SL";
+  }
+  return s;
+}
+
+function statusMeta(row) {
+  const s = outcomeByPrice(row);
   if (s === "TP") return { cls: "b-tp", text: "익절" };
   if (s === "SL") return { cls: "b-sl", text: "손절" };
   if (s === "CLOSED_FAIL") return { cls: "b-fail", text: "시간종료" };
@@ -275,6 +306,50 @@ function modeText(mode) {
   if (m === "aggressive") return "공격모드";
   if (m === "balanced") return "기본모드";
   return m || "-";
+}
+
+function reasonStateFromRecord(row) {
+  const raw = String(row?.reason || "").trim();
+  if (!raw) return null;
+  const text = raw.startsWith("plan_json:") ? raw.slice(10) : raw;
+  try {
+    const obj = JSON.parse(text);
+    return obj && typeof obj === "object" ? obj : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function inferSide(row) {
+  const raw = String(row?.side || "").toUpperCase();
+  if (raw === "BUY" || raw === "SELL") return raw;
+  const entry = Number(row?.entry_price);
+  const tp = Number(row?.take_profit_price);
+  const sl = Number(row?.stop_loss_price);
+  if (Number.isFinite(entry) && Number.isFinite(tp) && Number.isFinite(sl)) {
+    if (tp > entry && sl < entry) return "BUY";
+    if (tp < entry && sl > entry) return "SELL";
+  }
+  return "";
+}
+
+function sideLabel(row) {
+  const s = inferSide(row);
+  if (s === "BUY") return "롱";
+  if (s === "SELL") return "숏";
+  return "-";
+}
+
+function leverageText(row) {
+  const market = normalizeMarketValue(row?.market);
+  let lev = Number(row?.futures_leverage);
+  if (!Number.isFinite(lev) || lev <= 0) {
+    const reasonState = reasonStateFromRecord(row);
+    lev = Number(reasonState?.futures_leverage);
+  }
+  if (!Number.isFinite(lev) || lev <= 0) return market === "spot" ? "1x" : "-";
+  const norm = Math.max(1, Math.min(50, Math.round(lev)));
+  return `${norm}x`;
 }
 
 function normalizeTradeSymbol(symbol) {
@@ -1061,8 +1136,9 @@ function renderSummary(stats) {
   if (!summaryEl) return;
   const s = stats || {};
   latestOpenCount = Number.isFinite(Number(s.open)) ? Number(s.open) : latestOpenCount;
+  const winRate = Number.isFinite(Number(s.win_rate)) ? Number(s.win_rate) : 0;
   const cards = [
-    ["총 거래", Number(s.total || 0).toLocaleString("ko-KR")],
+    ["총 거래", `${Number(s.total || 0).toLocaleString("ko-KR")} (${winRate.toFixed(1)}%)`],
     ["손익금액", `${fmtSigned(Number(s.realized_pnl_usdt || 0))} USDT`],
     ["손익%", `${Number(s.realized_pnl_pct || 0).toFixed(2)}%`],
   ];
@@ -1073,7 +1149,7 @@ function renderSummary(stats) {
 function render(records) {
   if (!recordsBodyEl) return;
   if (!Array.isArray(records) || records.length === 0) {
-    recordsBodyEl.innerHTML = `<tr class="records-empty-row"><td colspan="9" class="records-num">표시할 기록이 없습니다.</td></tr>`;
+    recordsBodyEl.innerHTML = `<tr class="records-empty-row"><td colspan="11" class="records-num">표시할 기록이 없습니다.</td></tr>`;
     if (emptyStateEl) emptyStateEl.hidden = true;
     updateCurrentTradeStateChip([]);
     return;
@@ -1086,7 +1162,7 @@ function render(records) {
 
   recordsBodyEl.innerHTML = rows
     .map((r) => {
-      const st = statusMeta(r.status);
+      const st = statusMeta(r);
       const seed = Number(r?.notional_usdt || 0);
       const seedTxt = Number.isFinite(seed)
         ? `${seed.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDT`
@@ -1095,17 +1171,22 @@ function render(records) {
       const pnl = Number(r?.pnl_usdt || 0);
       const profitTxt = isOpen ? "거래중" : `${fmtSigned(pnl)} USDT`;
       const profitCls = isOpen ? "" : pnl >= 0 ? "pos" : "neg";
+      const pnlRate = Number.isFinite(seed) && seed > 0 ? (pnl / seed) * 100.0 : NaN;
+      const profitRateTxt = isOpen ? "거래중" : Number.isFinite(pnlRate) ? `${fmtSigned(pnlRate)}%` : "-";
+      const profitRateCls = isOpen ? "" : pnl >= 0 ? "pos" : "neg";
       const buyTs = fmtTs(r.opened_ms);
       const sellRaw = Number(r?.closed_ms || 0);
       const sellTs = Number.isFinite(sellRaw) && sellRaw > 0 ? fmtTs(sellRaw) : "-";
       return `<tr>
         <td data-label="상태"><span class="badge ${st.cls}">${st.text}</span></td>
         <td data-label="코인">${String(r.symbol || "-")}</td>
-        <td data-label="매매모드">${modeText(r.mode)}</td>
+        <td data-label="배수">${leverageText(r)}</td>
+        <td data-label="롱/숏 여부">${sideLabel(r)}</td>
         <td data-label="거래시드" class="records-num">${seedTxt}</td>
+        <td data-label="수익" class="records-num records-profit ${profitCls}">${profitTxt}</td>
+        <td data-label="수익률" class="records-num records-profit ${profitRateCls}">${profitRateTxt}</td>
         <td data-label="진입가" class="records-num">${fmtPrice(r.entry_price)}</td>
         <td data-label="익절/손절가" class="records-num">TP ${fmtPrice(r.take_profit_price)} / SL ${fmtPrice(r.stop_loss_price)}</td>
-        <td data-label="수익" class="records-num records-profit ${profitCls}">${profitTxt}</td>
         <td data-label="구매일시" class="records-num">${buyTs}</td>
         <td data-label="판매일시" class="records-num">${sellTs}</td>
       </tr>`;
@@ -1327,7 +1408,7 @@ window.addEventListener("keydown", (ev) => {
 initFilters();
 initConfigInputs();
 initConfigLock();
-if (recordsBodyEl) recordsBodyEl.innerHTML = `<tr><td colspan="9" class="records-num">불러오는 중...</td></tr>`;
+if (recordsBodyEl) recordsBodyEl.innerHTML = `<tr><td colspan="11" class="records-num">불러오는 중...</td></tr>`;
 Promise.all([load(), loadStats()]).catch((e) => alert(e.message || e));
 
 refreshTimer = setInterval(() => {

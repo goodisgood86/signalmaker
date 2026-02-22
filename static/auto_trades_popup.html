@@ -470,7 +470,7 @@
       }
       .summary {
         display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(125px, 1fr));
         gap: 9px;
         margin-bottom: 12px;
       }
@@ -589,7 +589,7 @@
       .records-table {
         width: 100%;
         border-collapse: collapse;
-        min-width: 840px;
+        min-width: 1120px;
       }
       .records-table thead th {
         text-align: left;
@@ -752,9 +752,6 @@
         .symbol-chips {
           grid-template-columns: repeat(4, minmax(0, 1fr));
         }
-        .summary {
-          grid-template-columns: repeat(3, minmax(0, 1fr));
-        }
         .records-toolbar {
           justify-content: flex-end;
         }
@@ -774,18 +771,10 @@
           background: rgba(5, 12, 26, 0.35);
         }
         .records-table {
-          min-width: 620px;
+          min-width: 1120px;
         }
         .records-table thead {
           display: table-header-group;
-        }
-        .records-table thead th:nth-child(3),
-        .records-table thead th:nth-child(8),
-        .records-table thead th:nth-child(9),
-        .records-table tbody td:nth-child(3),
-        .records-table tbody td:nth-child(8),
-        .records-table tbody td:nth-child(9) {
-          display: none;
         }
       }
       @media (max-width: 640px) {
@@ -1051,7 +1040,7 @@
       </div>
     </div>
     <div id="summary" class="summary">
-      <div class="stat"><div class="stat-k">총 거래</div><div class="stat-v">-</div></div>
+      <div class="stat"><div class="stat-k">총 거래</div><div class="stat-v">- (-%)</div></div>
       <div class="stat"><div class="stat-k">손익금액</div><div class="stat-v">-</div></div>
       <div class="stat"><div class="stat-k">손익%</div><div class="stat-v">-</div></div>
     </div>
@@ -1086,11 +1075,13 @@
             <tr>
               <th>상태</th>
               <th>코인</th>
-              <th>매매모드</th>
+              <th>배수</th>
+              <th>롱/숏 여부</th>
               <th>거래시드</th>
+              <th>수익</th>
+              <th>수익률</th>
               <th>진입가</th>
               <th>익절/손절가</th>
-              <th>수익</th>
               <th>구매일시</th>
               <th>판매일시</th>
             </tr>
@@ -1159,6 +1150,6 @@
         </div>
       </div>
     </div>
-    <script src="/static/auto_trades_popup.js?v=20260222i"></script>
+    <script src="/static/auto_trades_popup.js?v=20260222n"></script>
   </body>
 </html>

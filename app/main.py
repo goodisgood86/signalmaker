@@ -7213,19 +7213,34 @@ async def api_auto_trade_stats(
     day_start_ms = _kst_day_start_ms(now_ms)
     today_pnl = 0.0
     by_symbol: Dict[str, Dict[str, Any]] = {}
+
+    def _closed_outcome(status: str, pnl: float) -> str:
+        st = str(status or "").upper()
+        if st == "OPEN":
+            return "OPEN"
+        if st == "CLOSED_FAIL":
+            return "CLOSED_FAIL"
+        if st in {"TP", "SL"}:
+            if pnl > 0:
+                return "TP"
+            if pnl < 0:
+                return "SL"
+        return st
+
     for r in records:
         status = str(r.get("status", "")).upper()
         sym = str(r.get("symbol", "")).upper()
         pnl = float(r.get("pnl_usdt", 0.0) or 0.0)
         notional = float(r.get("notional_usdt", 0.0) or 0.0)
         closed_ms = int(r.get("closed_ms", 0) or 0)
-        if status == "OPEN":
+        outcome = _closed_outcome(status, pnl)
+        if outcome == "OPEN":
             open_cnt += 1
-        elif status == "TP":
+        elif outcome == "TP":
             tp_cnt += 1
-        elif status == "SL":
+        elif outcome == "SL":
             sl_cnt += 1
-        elif status == "CLOSED_FAIL":
+        elif outcome == "CLOSED_FAIL":
             fail_cnt += 1
         if status in {"TP", "SL", "CLOSED_FAIL"}:
             realized_pnl += pnl
@@ -7249,13 +7264,13 @@ async def api_auto_trade_stats(
             }
         a = by_symbol[sym]
         a["total"] += 1
-        if status == "OPEN":
+        if outcome == "OPEN":
             a["open"] += 1
-        elif status == "TP":
+        elif outcome == "TP":
             a["tp"] += 1
-        elif status == "SL":
+        elif outcome == "SL":
             a["sl"] += 1
-        elif status == "CLOSED_FAIL":
+        elif outcome == "CLOSED_FAIL":
             a["fail"] += 1
         if status in {"TP", "SL", "CLOSED_FAIL"}:
             a["realized_pnl_usdt"] += pnl

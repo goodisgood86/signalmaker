@@ -844,8 +844,39 @@ function setAutoTickStatus(data) {
   setAutoStatus("");
 }
 
-function autoStatusMeta(status) {
-  const st = String(status || "").toUpperCase();
+function autoOutcomeByPrice(row) {
+  const st = String(row?.status || "").toUpperCase();
+  if (st !== "TP" && st !== "SL") return st;
+  const entry = Number(row?.entry_price);
+  const close = Number(row?.close_price);
+  let side = String(row?.side || "").toUpperCase();
+  if (side !== "BUY" && side !== "SELL") {
+    const tp = Number(row?.take_profit_price);
+    const sl = Number(row?.stop_loss_price);
+    if (Number.isFinite(entry) && Number.isFinite(tp) && Number.isFinite(sl)) {
+      if (tp > entry && sl < entry) side = "BUY";
+      else if (tp < entry && sl > entry) side = "SELL";
+    }
+  }
+  if (Number.isFinite(entry) && Number.isFinite(close) && close > 0) {
+    if (side === "SELL") {
+      if (close < entry) return "TP";
+      if (close > entry) return "SL";
+    } else if (side === "BUY") {
+      if (close > entry) return "TP";
+      if (close < entry) return "SL";
+    }
+  }
+  const pnl = Number(row?.pnl_usdt);
+  if (Number.isFinite(pnl)) {
+    if (pnl > 0) return "TP";
+    if (pnl < 0) return "SL";
+  }
+  return st;
+}
+
+function autoStatusMeta(row) {
+  const st = autoOutcomeByPrice(row);
   if (st === "TP") return { cls: "tp", text: "익절" };
   if (st === "SL") return { cls: "sl", text: "손절" };
   if (st === "CLOSED_FAIL") return { cls: "fail", text: "시간종료" };
@@ -886,7 +917,7 @@ function renderAutoTrades(records) {
   }
   autoListEl.innerHTML = rows
     .map((r) => {
-      const meta = autoStatusMeta(r?.status);
+      const meta = autoStatusMeta(r);
       const pnlTxt =
         String(r?.status || "").toUpperCase() === "OPEN"
           ? "미실현"
