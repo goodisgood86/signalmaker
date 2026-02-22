@@ -961,7 +961,15 @@ async def _auto_ws_price_worker(*, market: str, symbols: List[str]) -> None:
 
 def _auth_is_public_path(path: str) -> bool:
     p = str(path or "")
-    if p in {"/api/health", "/favicon.ico"}:
+    if p in {
+        "/api/health",
+        "/favicon.ico",
+        "/favicon.svg",
+        "/apple-touch-icon.png",
+        "/site.webmanifest",
+        "/favicon-32x32.png",
+        "/favicon-16x16.png",
+    }:
         return True
     if p.startswith("/api/auth"):
         return True
@@ -1999,6 +2007,43 @@ async def _get_usdt_krw() -> float:
 @app.get("/")
 def index():
     return FileResponse("static/index.html")
+
+
+def _root_asset_response(filename: str, media_type: str | None = None):
+    asset_path = Path("static") / filename
+    if not asset_path.exists():
+        raise HTTPException(status_code=404, detail=f"{filename} not found")
+    return FileResponse(asset_path, media_type=media_type)
+
+
+@app.get("/favicon.ico")
+def favicon_ico():
+    return _root_asset_response("favicon.ico", media_type="image/x-icon")
+
+
+@app.get("/favicon.svg")
+def favicon_svg():
+    return _root_asset_response("favicon.svg", media_type="image/svg+xml")
+
+
+@app.get("/apple-touch-icon.png")
+def apple_touch_icon():
+    return _root_asset_response("apple-touch-icon.png", media_type="image/png")
+
+
+@app.get("/site.webmanifest")
+def site_webmanifest():
+    return _root_asset_response("site.webmanifest", media_type="application/manifest+json")
+
+
+@app.get("/favicon-32x32.png")
+def favicon_32():
+    return _root_asset_response("favicon-32.png", media_type="image/png")
+
+
+@app.get("/favicon-16x16.png")
+def favicon_16():
+    return _root_asset_response("favicon-16.png", media_type="image/png")
 
 
 @app.get("/api/health")
