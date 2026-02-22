@@ -67,7 +67,15 @@ const centerCloseBtnEl = document.getElementById("centerCloseBtn");
 const logicModalEl = document.getElementById("logicModal");
 const logicModalCloseBtnEl = document.getElementById("logicModalCloseBtn");
 const centerGoogleModalEl = document.getElementById("centerGoogleModal");
+const centerGoogleModalDescEl = document.getElementById("centerGoogleModalDesc");
 const centerGoogleModalBtnEl = document.getElementById("centerGoogleModalBtn");
+const centerGoogleModalBtnWrapEl = document.getElementById("centerGoogleModalBtnWrap");
+const centerGoogleModalStateEl = document.getElementById("centerGoogleModalState");
+const centerGoogleModalStateEmailEl = document.getElementById("centerGoogleModalStateEmail");
+const centerGoogleModalActionsEl = document.getElementById("centerGoogleModalActions");
+const centerGoogleSwitchBtnEl = document.getElementById("centerGoogleSwitchBtn");
+const centerGoogleDisconnectBtnEl = document.getElementById("centerGoogleDisconnectBtn");
+const centerGoogleModalNoteEl = document.getElementById("centerGoogleModalNote");
 const centerGoogleModalCloseBtnEl = document.getElementById("centerGoogleModalCloseBtn");
 
 const SYMBOLS = ["ALL", "BTCUSDT", "ETHUSDT", "XRPUSDT", "DOGEUSDT", "SUIUSDT", "SOLUSDT", "CROSSUSDT"];
@@ -115,6 +123,7 @@ let cfgGoogleUnlockBusy = false;
 let cfgPasswordUnlockEnabled = true;
 let cfgUnlockSessionMethod = "";
 let cfgUnlockSessionEmail = "";
+let centerGoogleSessionActionBusy = false;
 
 function fmtPrice(v) {
   const n = Number(v);
@@ -505,10 +514,49 @@ function updateCenterGoogleAuthButton() {
   if (centerGoogleAuthBtnTextEl) centerGoogleAuthBtnTextEl.textContent = linked ? "구글 연동 중" : "구글 연동";
   if (linked) {
     const emailTxt = String(cfgUnlockSessionEmail || "").trim();
-    centerGoogleAuthBtnEl.title = emailTxt ? `연동 계정: ${emailTxt}\n클릭하면 연동 해제` : "클릭하면 연동 해제";
+    centerGoogleAuthBtnEl.title = emailTxt ? `연동 계정: ${emailTxt}\n클릭하면 연동 상태를 확인합니다.` : "클릭하면 연동 상태를 확인합니다.";
   } else {
     centerGoogleAuthBtnEl.title = "클릭하면 구글 로그인 화면이 열립니다.";
   }
+}
+
+function setCenterGoogleModalNote(msg, tone = "") {
+  if (!centerGoogleModalNoteEl) return;
+  centerGoogleModalNoteEl.classList.remove("warn", "ok");
+  const text = String(msg || "").trim();
+  centerGoogleModalNoteEl.textContent = text;
+  if (tone === "warn") centerGoogleModalNoteEl.classList.add("warn");
+  else if (tone === "ok") centerGoogleModalNoteEl.classList.add("ok");
+}
+
+function setCenterGoogleSessionActionBusy(busy) {
+  centerGoogleSessionActionBusy = Boolean(busy);
+  if (centerGoogleModalActionsEl) centerGoogleModalActionsEl.classList.toggle("is-busy", centerGoogleSessionActionBusy);
+  if (centerGoogleSwitchBtnEl) centerGoogleSwitchBtnEl.disabled = centerGoogleSessionActionBusy;
+  if (centerGoogleDisconnectBtnEl) centerGoogleDisconnectBtnEl.disabled = centerGoogleSessionActionBusy;
+}
+
+function updateCenterGoogleModalUi() {
+  const linked = isGoogleSessionUnlocked();
+  const emailTxt = String(cfgUnlockSessionEmail || "").trim();
+  if (centerGoogleModalDescEl) {
+    centerGoogleModalDescEl.textContent = linked
+      ? "현재 구글 계정이 연동되어 있습니다. 계정 변경 또는 연동 해제를 선택할 수 있습니다."
+      : "허용된 구글 계정으로 로그인하면 자동매매 설정 잠금이 해제됩니다.";
+  }
+  if (centerGoogleModalStateEl) centerGoogleModalStateEl.hidden = !linked;
+  if (centerGoogleModalStateEmailEl) centerGoogleModalStateEmailEl.textContent = emailTxt || "-";
+  if (centerGoogleModalBtnWrapEl) centerGoogleModalBtnWrapEl.hidden = linked;
+  if (centerGoogleModalActionsEl) centerGoogleModalActionsEl.hidden = !linked;
+  if (linked) {
+    setCenterGoogleModalNote("계정을 바꾸려면 '계정 변경'을 누른 뒤 다시 로그인하세요.");
+  } else {
+    const allowed = Array.isArray(cfgGoogleLogin?.allowedEmails)
+      ? cfgGoogleLogin.allowedEmails.map((x) => String(x || "").trim()).filter(Boolean)
+      : [];
+    setCenterGoogleModalNote(allowed.length ? `허용 계정: ${allowed.join(", ")}` : "");
+  }
+  setCenterGoogleSessionActionBusy(centerGoogleSessionActionBusy);
 }
 
 function configLockGuideText() {
@@ -571,12 +619,16 @@ async function unlockByGoogleCredential(credential) {
     setConfigLocked(false);
     setCfgLockStatus("구글 로그인으로 잠금이 해제되었습니다.");
     setTopHint("구글 연동 완료. 펼치기 후 설정을 변경할 수 있습니다.");
+    updateCenterGoogleModalUi();
+    setCenterGoogleModalNote("구글 연동 완료", "ok");
     await Promise.all([loadConfig(), loadBinanceLink()]);
   } catch (e) {
     const msg = errMessage(e);
     setConfigLocked(true);
     setCfgLockStatus(`구글 로그인 실패: ${msg}`);
     setTopHint(`구글 로그인 실패: ${msg}`);
+    updateCenterGoogleModalUi();
+    setCenterGoogleModalNote(`로그인 실패: ${msg}`, "warn");
   } finally {
     setGoogleUnlockBusy(false);
   }
@@ -633,6 +685,7 @@ function setCenterGoogleModalOpen(open) {
   if (!centerGoogleModalEl) return;
   const isOpen = Boolean(open);
   centerGoogleModalEl.hidden = !isOpen;
+  if (isOpen) updateCenterGoogleModalUi();
   document.body.style.overflow = isOpen ? "hidden" : "";
 }
 
@@ -643,11 +696,18 @@ function openGoogleLoginPrompt(retry = 0) {
     setTopHint("구글 연동이 설정되지 않았습니다.");
     return;
   }
+  const linked = isGoogleSessionUnlocked();
   setCenterGoogleModalOpen(true);
+  updateCenterGoogleModalUi();
+  if (linked) {
+    setTopHint("연동 계정을 확인하거나 계정 변경/연동 해제를 선택할 수 있습니다.");
+    return;
+  }
   renderGoogleUnlockButton();
   if (!(window.google && window.google.accounts && window.google.accounts.id)) {
     setCfgLockStatus("구글 로그인 모듈 로딩 중입니다. 잠시 후 다시 시도해주세요.");
     setTopHint("구글 로그인 모듈 로딩 중입니다. 잠시 후 다시 시도해주세요.");
+    setCenterGoogleModalNote("구글 로그인 모듈 로딩 중입니다. 잠시 후 다시 시도해주세요.", "warn");
     if (retry < 10) {
       setTimeout(() => openGoogleLoginPrompt(retry + 1), 250);
     }
@@ -906,6 +966,7 @@ async function loadConfigLockStatus() {
     applyConfigLockMethodUi();
     renderGoogleUnlockButton();
     setConfigLocked(!unlocked);
+    updateCenterGoogleModalUi();
     await loadRuntimeStatus();
     await loadBinanceLink();
     if (!unlocked) {
@@ -921,27 +982,88 @@ async function loadConfigLockStatus() {
   }
 }
 
-async function lockConfigSession() {
+async function lockConfigSession(opts = {}) {
+  const options = opts && typeof opts === "object" ? opts : {};
+  const closeModal = options.closeModal !== false;
+  const lockStatusMsg = typeof options.lockStatusMsg === "string" ? options.lockStatusMsg : lockPromptText();
+  const topHintMsg = typeof options.topHintMsg === "string" ? options.topHintMsg : "구글 연동이 해제되었습니다.";
   try {
-    setCenterGoogleModalOpen(false);
+    if (closeModal) setCenterGoogleModalOpen(false);
     await fetchJSON("/api/auto_trade/config_lock/lock", { method: "POST" });
     setConfigLocked(true);
-    setCfgLockStatus(lockPromptText());
-    setTopHint("구글 연동이 해제되었습니다.");
+    setCfgLockStatus(lockStatusMsg);
+    setTopHint(topHintMsg);
     try {
       if (window.google?.accounts?.id?.disableAutoSelect) window.google.accounts.id.disableAutoSelect();
     } catch (_) {}
+    updateCenterGoogleModalUi();
+    return true;
   } catch (e) {
     const msg = errMessage(e);
     setCfgLockStatus(`로그아웃 실패: ${msg}`);
+    setCenterGoogleModalNote(`연동 해제 실패: ${msg}`, "warn");
+    return false;
+  }
+}
+
+async function onCenterGoogleDisconnectClick() {
+  if (!isGoogleSessionUnlocked()) {
+    setCenterGoogleModalOpen(false);
+    return;
+  }
+  setCenterGoogleSessionActionBusy(true);
+  try {
+    await lockConfigSession({
+      closeModal: true,
+      topHintMsg: "구글 연동이 해제되었습니다.",
+      lockStatusMsg: lockPromptText(),
+    });
+  } finally {
+    setCenterGoogleSessionActionBusy(false);
+  }
+}
+
+async function onCenterGoogleSwitchClick() {
+  if (!isGoogleSessionUnlocked()) {
+    openGoogleLoginPrompt();
+    return;
+  }
+  setCenterGoogleSessionActionBusy(true);
+  try {
+    const emailTxt = String(cfgUnlockSessionEmail || "").trim();
+    const ok = await lockConfigSession({
+      closeModal: false,
+      topHintMsg: "계정 변경을 위해 다시 로그인해주세요.",
+      lockStatusMsg: "계정 변경을 위해 구글 로그인을 다시 진행해주세요.",
+    });
+    if (!ok) return;
+    try {
+      if (window.google?.accounts?.id?.disableAutoSelect) window.google.accounts.id.disableAutoSelect();
+      if (window.google?.accounts?.id?.revoke && emailTxt) {
+        await new Promise((resolve) => {
+          let done = false;
+          const finish = () => {
+            if (done) return;
+            done = true;
+            resolve();
+          };
+          const timer = setTimeout(finish, 1200);
+          window.google.accounts.id.revoke(emailTxt, () => {
+            clearTimeout(timer);
+            finish();
+          });
+        });
+      }
+    } catch (_) {}
+    updateCenterGoogleModalUi();
+    renderGoogleUnlockButton();
+    setCenterGoogleModalNote("계정을 선택해 다시 연동해주세요.");
+  } finally {
+    setCenterGoogleSessionActionBusy(false);
   }
 }
 
 async function onCenterGoogleAuthClick() {
-  if (isGoogleSessionUnlocked()) {
-    await lockConfigSession();
-    return;
-  }
   openGoogleLoginPrompt();
 }
 
@@ -1630,6 +1752,14 @@ if (cfgUnlockInputEl)
 if (centerGoogleAuthBtnEl)
   centerGoogleAuthBtnEl.addEventListener("click", () => {
     onCenterGoogleAuthClick().catch(() => {});
+  });
+if (centerGoogleSwitchBtnEl)
+  centerGoogleSwitchBtnEl.addEventListener("click", () => {
+    onCenterGoogleSwitchClick().catch(() => {});
+  });
+if (centerGoogleDisconnectBtnEl)
+  centerGoogleDisconnectBtnEl.addEventListener("click", () => {
+    onCenterGoogleDisconnectClick().catch(() => {});
   });
 if (cfgCollapseBtnEl) cfgCollapseBtnEl.addEventListener("click", () => toggleConfigCollapsed());
 if (bnLinkBtnEl) bnLinkBtnEl.addEventListener("click", () => linkBinance());

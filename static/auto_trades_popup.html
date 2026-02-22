@@ -148,42 +148,117 @@
         display: none !important;
       }
       .center-google-modal-dialog {
-        width: min(420px, 100%);
-        border-radius: 14px;
-        border: 1px solid rgba(185, 211, 255, 0.3);
-        background: linear-gradient(180deg, rgba(8, 18, 38, 0.98), rgba(4, 12, 27, 0.98));
-        box-shadow: 0 24px 58px rgba(0, 0, 0, 0.44);
-        padding: 14px;
+        width: min(520px, 100%);
+        border-radius: 16px;
+        border: 1px solid rgba(185, 211, 255, 0.34);
+        background: linear-gradient(180deg, rgba(8, 18, 38, 0.98), rgba(3, 10, 24, 0.98));
+        box-shadow: 0 24px 58px rgba(0, 0, 0, 0.48);
+        padding: 16px;
       }
       .center-google-modal-head {
         display: flex;
         align-items: center;
         justify-content: space-between;
         gap: 10px;
+        margin-bottom: 8px;
       }
       .center-google-modal-title {
-        font-size: 15px;
-        font-weight: 820;
+        font-size: 30px;
+        font-weight: 860;
+        letter-spacing: -0.3px;
       }
       .center-google-modal-close {
         width: auto;
-        min-width: 66px;
+        min-width: 72px;
         height: 30px;
         padding: 0 10px;
         font-size: 12px;
+        align-self: flex-start;
       }
       .center-google-modal-desc {
-        margin-top: 6px;
+        font-size: 18px;
+        line-height: 1.45;
+        color: rgba(234, 243, 255, 0.9);
+      }
+      .center-google-modal-body {
+        margin-top: 14px;
+        border-radius: 12px;
+        border: 1px solid rgba(172, 206, 255, 0.28);
+        background: rgba(9, 19, 39, 0.84);
+        padding: 12px;
+      }
+      .center-google-modal-state {
+        border: 1px solid rgba(84, 228, 177, 0.3);
+        border-radius: 11px;
+        background: rgba(18, 44, 61, 0.4);
+        padding: 10px 11px;
+      }
+      .center-google-modal-state[hidden] {
+        display: none !important;
+      }
+      .center-google-modal-state-label {
         font-size: 12px;
-        color: rgba(234, 243, 255, 0.84);
+        color: rgba(227, 255, 244, 0.9);
+        margin-bottom: 4px;
+      }
+      .center-google-modal-state-email {
+        font-size: 15px;
+        font-weight: 760;
+        color: rgba(234, 243, 255, 0.98);
+        word-break: break-all;
+      }
+      .center-google-modal-btn-wrap {
+        margin-top: 10px;
+      }
+      .center-google-modal-btn-wrap[hidden] {
+        display: none !important;
       }
       .center-google-modal-btn {
-        margin-top: 10px;
         display: flex;
-        justify-content: center;
+        justify-content: flex-start;
       }
       .center-google-modal-btn > div {
-        width: min(320px, 100%) !important;
+        width: min(360px, 100%) !important;
+      }
+      .center-google-modal-actions {
+        margin-top: 10px;
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+      }
+      .center-google-modal-actions[hidden] {
+        display: none !important;
+      }
+      .center-google-modal-actions button {
+        height: 36px;
+        border-radius: 10px;
+        font-size: 12px;
+      }
+      .center-google-modal-switch {
+        background: rgba(78, 230, 255, 0.12);
+        border-color: rgba(78, 230, 255, 0.35);
+        color: rgba(214, 248, 255, 0.95);
+      }
+      .center-google-modal-disconnect {
+        background: rgba(255, 154, 176, 0.14);
+        border-color: rgba(255, 154, 176, 0.4);
+        color: rgba(255, 219, 229, 0.96);
+      }
+      .center-google-modal-actions.is-busy {
+        opacity: 0.62;
+        pointer-events: none;
+      }
+      .center-google-modal-note {
+        margin-top: 10px;
+        min-height: 16px;
+        font-size: 12px;
+        color: rgba(234, 243, 255, 0.82);
+      }
+      .center-google-modal-note.warn {
+        color: rgba(255, 189, 206, 0.95);
+      }
+      .center-google-modal-note.ok {
+        color: rgba(122, 245, 198, 0.95);
       }
       .logic-modal[hidden] {
         display: none !important;
@@ -1022,6 +1097,15 @@
           min-width: 66px;
           padding: 0 10px;
         }
+        .center-google-modal-dialog {
+          padding: 14px;
+        }
+        .center-google-modal-title {
+          font-size: 26px;
+        }
+        .center-google-modal-desc {
+          font-size: 16px;
+        }
       }
       @media (max-width: 420px) {
         .mobile-shell {
@@ -1058,6 +1142,15 @@
         #bnLinkFormActions .bn-actions button {
           min-width: 156px;
           max-width: 186px;
+        }
+        .center-google-modal-title {
+          font-size: 23px;
+        }
+        .center-google-modal-desc {
+          font-size: 14px;
+        }
+        .center-google-modal-actions {
+          grid-template-columns: 1fr;
         }
       }
     </style>
@@ -1344,11 +1437,24 @@
           <div id="centerGoogleModalTitle" class="center-google-modal-title">구글 연동</div>
           <button id="centerGoogleModalCloseBtn" class="ghost center-google-modal-close" type="button">닫기</button>
         </div>
-        <div class="center-google-modal-desc">허용된 구글 계정으로 로그인하면 자동매매 설정이 잠금 해제됩니다.</div>
-        <div id="centerGoogleModalBtn" class="center-google-modal-btn"></div>
+        <div id="centerGoogleModalDesc" class="center-google-modal-desc">허용된 구글 계정으로 로그인하면 자동매매 설정 잠금이 해제됩니다.</div>
+        <div class="center-google-modal-body">
+          <div id="centerGoogleModalState" class="center-google-modal-state" hidden>
+            <div class="center-google-modal-state-label">현재 연동 계정</div>
+            <div id="centerGoogleModalStateEmail" class="center-google-modal-state-email">-</div>
+          </div>
+          <div id="centerGoogleModalBtnWrap" class="center-google-modal-btn-wrap">
+            <div id="centerGoogleModalBtn" class="center-google-modal-btn"></div>
+          </div>
+          <div id="centerGoogleModalActions" class="center-google-modal-actions" hidden>
+            <button id="centerGoogleSwitchBtn" class="center-google-modal-switch" type="button">계정 변경</button>
+            <button id="centerGoogleDisconnectBtn" class="center-google-modal-disconnect" type="button">연동 해제</button>
+          </div>
+          <div id="centerGoogleModalNote" class="center-google-modal-note"></div>
+        </div>
       </div>
     </div>
     <script src="https://accounts.google.com/gsi/client" async defer></script>
-    <script src="/static/auto_trades_popup.js?v=20260222w"></script>
+    <script src="/static/auto_trades_popup.js?v=20260222x"></script>
   </body>
 </html>
