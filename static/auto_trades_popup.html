@@ -633,6 +633,8 @@
         background: rgba(5, 12, 26, 0.35);
       }
       .records-table {
+        --records-col-status: 98px;
+        --records-col-symbol: 116px;
         width: 100%;
         border-collapse: collapse;
         min-width: 1120px;
@@ -650,6 +652,34 @@
         top: 0;
         z-index: 1;
       }
+      .records-table thead th:nth-child(1),
+      .records-table tbody td:nth-child(1) {
+        position: sticky;
+        left: 0;
+        min-width: var(--records-col-status);
+        width: var(--records-col-status);
+      }
+      .records-table thead th:nth-child(2),
+      .records-table tbody td:nth-child(2) {
+        position: sticky;
+        left: var(--records-col-status);
+        min-width: var(--records-col-symbol);
+        width: var(--records-col-symbol);
+      }
+      .records-table thead th:nth-child(1),
+      .records-table thead th:nth-child(2) {
+        z-index: 4;
+        background: rgba(14, 28, 53, 0.98);
+      }
+      .records-table tbody td:nth-child(1),
+      .records-table tbody td:nth-child(2) {
+        z-index: 2;
+        background: rgba(8, 18, 36, 0.98);
+      }
+      .records-table thead th:nth-child(2),
+      .records-table tbody td:nth-child(2) {
+        box-shadow: 1px 0 0 rgba(180, 206, 255, 0.2);
+      }
       .records-table tbody td {
         font-size: 12px;
         color: rgba(234, 243, 255, 0.94);
@@ -661,6 +691,10 @@
       }
       .records-table tbody tr:hover {
         background: rgba(255, 255, 255, 0.03);
+      }
+      .records-table tbody tr:hover td:nth-child(1),
+      .records-table tbody tr:hover td:nth-child(2) {
+        background: rgba(23, 35, 60, 0.98);
       }
       .records-num {
         font-variant-numeric: tabular-nums;
