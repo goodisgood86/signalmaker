@@ -295,6 +295,10 @@ _AUTO_STATS_CACHE_TTL_S = max(
     2.0, float(str(os.getenv("AUTO_STATS_CACHE_TTL_S", "10")) or "10")
 )
 _AUTO_STATS_CACHE: Dict[int, Dict[str, Any]] = {}
+_AUTO_RECORDS_CACHE_TTL_S = max(
+    1.0, float(str(os.getenv("AUTO_RECORDS_CACHE_TTL_S", "5")) or "5")
+)
+_AUTO_RECORDS_CACHE: Dict[str, Dict[str, Any]] = {}
 _AUTO_ENTRY_CHASE_MAX_PCT = max(
     0.0,
     min(0.05, float(str(os.getenv("AUTO_ENTRY_CHASE_MAX_PCT", "0.012")) or "0.012")),
@@ -7697,6 +7701,12 @@ async def api_auto_trade_tick(
     force_run = bool(payload.get("force", False))
     result = await _auto_trade_tick_core(user_id, force_run=force_run, source="api")
     _auto_set_runtime_state(user_id=user_id, source="api", result=result)
+    # 실거래 상태 갱신 이후에는 기록/통계 캐시를 즉시 비운다.
+    _AUTO_STATS_CACHE.pop(user_id, None)
+    prefix = f"{user_id}:"
+    for k in list(_AUTO_RECORDS_CACHE.keys()):
+        if str(k).startswith(prefix):
+            _AUTO_RECORDS_CACHE.pop(k, None)
     return result
 
 
@@ -7711,11 +7721,30 @@ async def api_auto_trade_records(
 ):
     public_user = await _sim_get_or_create_public_user()
     user_id = int(public_user.get("id"))
+    symbol_u = str(symbol or "").strip().upper()
+    mode_v = str(mode or "").strip().lower()
+    status_v = str(status_filter or "").strip().upper()
     if sync_updates:
         await _auto_refresh_open_records(user_id, sync_updates=True)
+        prefix = f"{user_id}:"
+        for k in list(_AUTO_RECORDS_CACHE.keys()):
+            if str(k).startswith(prefix):
+                _AUTO_RECORDS_CACHE.pop(k, None)
     per_page = max(1, min(int(limit), 200))
+    page_v = int(page)
+    cache_key = ""
+    now_ts = time()
+    if not sync_updates:
+        status_key = status_v if status_v in _AUTO_ALLOWED_RECORD_STATUS else ""
+        cache_key = f"{user_id}:{symbol_u}:{mode_v}:{status_key}:{per_page}:{page_v}"
+        cached = _AUTO_RECORDS_CACHE.get(cache_key)
+        if isinstance(cached, dict):
+            ts = float(cached.get("ts", 0.0) or 0.0)
+            payload = cached.get("payload")
+            if isinstance(payload, dict) and (now_ts - ts) <= _AUTO_RECORDS_CACHE_TTL_S:
+                return payload
     fetch_n = per_page + 1
-    offset = (int(page) - 1) * per_page
+    offset = (page_v - 1) * per_page
     params = {
         "select": "id,user_id,symbol,market,interval,mode,side,status,entry_price,take_profit_price,stop_loss_price,qty,notional_usdt,close_price,pnl_usdt,opened_ms,closed_ms,signal_buy_pct,signal_sell_pct,signal_confidence,decision_diff,reason",
         "user_id": f"eq.{user_id}",
@@ -7723,13 +7752,10 @@ async def api_auto_trade_records(
         "limit": str(fetch_n),
         "offset": str(offset),
     }
-    symbol_u = str(symbol or "").strip().upper()
     if symbol_u:
         params["symbol"] = f"eq.{symbol_u}"
-    mode_v = str(mode or "").strip().lower()
     if mode_v:
         params["mode"] = f"eq.{mode_v}"
-    status_v = str(status_filter or "").strip().upper()
     if status_v in _AUTO_ALLOWED_RECORD_STATUS:
         params["status"] = f"eq.{status_v}"
     try:
@@ -7745,7 +7771,13 @@ async def api_auto_trade_records(
         rec = dict(row) if isinstance(row, dict) else {}
         rec["seed_usdt"] = round(_auto_record_effective_seed_usdt(rec), 4)
         page_rows.append(rec)
-    return {"ok": True, "records": page_rows, "page": int(page), "limit": per_page, "has_next": has_next}
+    resp = {"ok": True, "records": page_rows, "page": page_v, "limit": per_page, "has_next": has_next}
+    if cache_key:
+        _AUTO_RECORDS_CACHE[cache_key] = {"ts": now_ts, "payload": resp}
+        if len(_AUTO_RECORDS_CACHE) > 512:
+            for k in list(_AUTO_RECORDS_CACHE.keys())[:128]:
+                _AUTO_RECORDS_CACHE.pop(k, None)
+    return resp
 
 
 @app.get("/api/auto_trade/audit")

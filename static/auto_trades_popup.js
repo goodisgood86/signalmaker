@@ -100,6 +100,7 @@ let hasNext = false;
 let activeLoadSeq = 0;
 let activeRecordsController = null;
 let recordsLoading = false;
+let recordsManualNavUntilTs = 0;
 let refreshTimer = null;
 let statsRefreshTimer = null;
 let collateralRefreshTimer = null;
@@ -117,6 +118,7 @@ let collateralGuardBusy = false;
 let lastCollateralFetchMs = 0;
 const COLLATERAL_MIN_INTERVAL_MS = 30000;
 const STATS_REFRESH_INTERVAL_MS = 60000;
+const RECORDS_NAV_COOLDOWN_MS = 12000;
 let latestOpenCount = null;
 let runningSymbol = "ALL";
 let latestTickStatusText = "";
@@ -1774,6 +1776,7 @@ async function tryUnlockConfig() {
 
 function onFilterChange() {
   if (recordsLoading) return;
+  recordsManualNavUntilTs = Date.now() + RECORDS_NAV_COOLDOWN_MS;
   page = 1;
   load().catch((e) => alert(e.message || e));
 }
@@ -1784,12 +1787,14 @@ filterStatusEl.addEventListener("change", onFilterChange);
 prevBtnEl.addEventListener("click", () => {
   if (recordsLoading) return;
   if (page <= 1) return;
+  recordsManualNavUntilTs = Date.now() + RECORDS_NAV_COOLDOWN_MS;
   page -= 1;
   load().catch((e) => alert(e.message || e));
 });
 nextBtnEl.addEventListener("click", () => {
   if (recordsLoading) return;
   if (!hasNext) return;
+  recordsManualNavUntilTs = Date.now() + RECORDS_NAV_COOLDOWN_MS;
   page += 1;
   load().catch((e) => alert(e.message || e));
 });
@@ -1945,6 +1950,8 @@ Promise.all([load(), loadStats()]).catch((e) => alert(e.message || e));
 refreshTimer = setInterval(() => {
   if (document.hidden) return;
   if (recordsLoading) return;
+  if (page > 1) return;
+  if (Date.now() < recordsManualNavUntilTs) return;
   load().catch(() => {});
 }, 8000);
 statsRefreshTimer = setInterval(() => {
