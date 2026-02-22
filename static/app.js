@@ -346,7 +346,7 @@ function setAutoRecordSummaryUI(state, payload = {}) {
         ? "is-error"
         : "is-pending"
   );
-  if (autoRecordModeNoteEl) autoRecordModeNoteEl.textContent = payload.modeNote || "-";
+  if (autoRecordModeNoteEl) autoRecordModeNoteEl.textContent = "";
   if (autoRecordRangeEl) autoRecordRangeEl.textContent = payload.rangeText || "-";
   if (autoRecordTpEl) autoRecordTpEl.textContent = payload.tpText || "-";
   if (autoRecordSlEl) autoRecordSlEl.textContent = payload.slText || "-";
@@ -366,7 +366,7 @@ function resetAutoRecordSummaryUI(note = "코인 변경: 자동매매 기록 대
     activeAutoRecordController = null;
   }
   setAutoRecordSummaryUI("pending", {
-    modeNote: note,
+    modeNote: "",
     rangeText: "-",
     tpText: "-",
     slText: "-",
@@ -409,21 +409,17 @@ function updateAutoRecordTargetOptions(bySymbolItems = []) {
   autoRecordTargetEl.dataset.pendingTarget = "";
 }
 
-function fmtYmdHm(ms) {
-  const n = Number(ms || 0);
-  if (!Number.isFinite(n) || n <= 0) return "-";
-  const d = new Date(n);
-  const hh = String(d.getHours()).padStart(2, "0");
-  const mm = String(d.getMinutes()).padStart(2, "0");
-  return `${fmtYmd(n)} ${hh}:${mm}`;
-}
-
 function buildAutoRecordRangeText(startMs, endMs) {
   const start = Number(startMs || 0);
   const end = Number(endMs || 0);
-  if (start > 0 && end > 0) return `${fmtYmdHm(start)} ~ ${fmtYmdHm(end)}`;
-  if (start > 0) return `${fmtYmdHm(start)} ~`;
-  if (end > 0) return `~ ${fmtYmdHm(end)}`;
+  const startTxt = fmtYmd(start);
+  const endTxt = fmtYmd(end);
+  if (start > 0 && end > 0) {
+    if (startTxt === endTxt) return startTxt;
+    return `${startTxt} ~ ${endTxt}`;
+  }
+  if (start > 0) return `${startTxt} ~`;
+  if (end > 0) return `~ ${endTxt}`;
   return "거래 없음";
 }
 
@@ -489,6 +485,8 @@ let activeLoadSeq = 0;
 let activeAutoRecordController = null;
 let activeAutoRecordSeq = 0;
 let autoRecordSummaryTimer = null;
+let autoRecordStatsSnapshot = null;
+let autoRecordStatsTs = 0;
 let autoTickBusy = false;
 let autoConfigReady = false;
 
@@ -534,6 +532,7 @@ const COINS = [
 const UI_STATE_KEY = "coin.ui.state.v1";
 const AUTO_RECORD_TARGET_SELECTED = "__selected__";
 const AUTO_RECORD_TARGET_ALL = "__all__";
+const AUTO_RECORD_STATS_TTL_MS = 30000;
 const ALLOWED_ANALYSIS_INTERVALS = new Set(["5m", "1h", "4h"]);
 
 function normalizeAnalysisInterval(v) {
@@ -2990,11 +2989,9 @@ function buildAutoRecordSummaryPayload(stats, bySymbolItems) {
   const target = autoRecordTargetValue();
   const symbol = autoRecordResolvedSymbol();
   const rows = Array.isArray(bySymbolItems) ? bySymbolItems : [];
-  let scopeLabel = target === AUTO_RECORD_TARGET_ALL ? "전체 코인" : symbol || "-";
   let total = 0;
   let tp = 0;
   let sl = 0;
-  let fail = 0;
   let winRate = 0.0;
   let firstOpenedMs = 0;
   let lastEventMs = 0;
@@ -3002,7 +2999,6 @@ function buildAutoRecordSummaryPayload(stats, bySymbolItems) {
     total = Number(stats?.total || 0);
     tp = Number(stats?.tp || 0);
     sl = Number(stats?.sl || 0);
-    fail = Number(stats?.fail || 0);
     winRate = Number(stats?.win_rate || 0);
     firstOpenedMs = Number(stats?.first_opened_ms || 0);
     lastEventMs = Number(stats?.last_event_ms || 0);
@@ -3012,22 +3008,16 @@ function buildAutoRecordSummaryPayload(stats, bySymbolItems) {
       total = Number(row.total || 0);
       tp = Number(row.tp || 0);
       sl = Number(row.sl || 0);
-      fail = Number(row.fail || 0);
       winRate = Number(row.win_rate || 0);
       firstOpenedMs = Number(row.first_opened_ms || 0);
       lastEventMs = Number(row.last_event_ms || 0);
     }
-    if (!scopeLabel || scopeLabel === "-") scopeLabel = "현재 코인";
   }
-  const done = tp + sl + fail;
   const hasTrades = total > 0;
-  let modeNote = `${scopeLabel} · 총 ${total}건 / 종료 ${done}건 / 승률 ${winRate.toFixed(1)}%`;
-  if (fail > 0) modeNote += ` / 기타 ${fail}건`;
-  if (!hasTrades) modeNote = `${scopeLabel} · 아직 자동매매 기록이 없습니다.`;
   return {
     hasTrades,
     winRate,
-    modeNote,
+    modeNote: "",
     rangeText: buildAutoRecordRangeText(firstOpenedMs, lastEventMs),
     tpText: `${tp}건`,
     slText: `${sl}건`,
@@ -3039,8 +3029,20 @@ async function loadAutoRecordSummary(force = false) {
   const target = autoRecordTargetValue();
   const key = `${selectedSymbol}:${selectedMarket}:${target}`;
   const now = Date.now();
-  if (!force && key === autoRecordSummaryKey && now - autoRecordSummaryTs < 12000) return;
-  setAutoRecordSummaryUI("pending", { modeNote: "자동매매 통계 불러오는 중..." });
+  if (!force && key === autoRecordSummaryKey && now - autoRecordSummaryTs < 1200) return;
+  const hasFreshSnapshot = Boolean(autoRecordStatsSnapshot) && now - autoRecordStatsTs < AUTO_RECORD_STATS_TTL_MS;
+  if (!hasFreshSnapshot) {
+    setAutoRecordSummaryUI("pending", { modeNote: "", rangeText: "-", tpText: "-", slText: "-" });
+  }
+  if (hasFreshSnapshot && !force) {
+    const bySymbolFast = Array.isArray(autoRecordStatsSnapshot?.by_symbol) ? autoRecordStatsSnapshot.by_symbol : [];
+    updateAutoRecordTargetOptions(bySymbolFast);
+    const payloadFast = buildAutoRecordSummaryPayload(autoRecordStatsSnapshot?.stats || {}, bySymbolFast);
+    autoRecordSummaryKey = key;
+    autoRecordSummaryTs = now;
+    setAutoRecordSummaryUI(payloadFast.hasTrades ? "success" : "pending", payloadFast);
+    return;
+  }
   if (activeAutoRecordController) {
     try {
       activeAutoRecordController.abort();
@@ -3054,6 +3056,8 @@ async function loadAutoRecordSummary(force = false) {
   try {
     const data = await fetchJSON("/api/auto_trade/stats?sync=0", { signal: controller.signal });
     if (controller.signal.aborted || reqSeq !== activeAutoRecordSeq) return;
+    autoRecordStatsSnapshot = data || { stats: {}, by_symbol: [] };
+    autoRecordStatsTs = Date.now();
     const bySymbol = Array.isArray(data?.by_symbol) ? data.by_symbol : [];
     updateAutoRecordTargetOptions(bySymbol);
     const payload = buildAutoRecordSummaryPayload(data?.stats || {}, bySymbol);
@@ -3061,7 +3065,7 @@ async function loadAutoRecordSummary(force = false) {
   } catch (e) {
     if (e?.name === "AbortError") return;
     setAutoRecordSummaryUI("error", {
-      modeNote: "자동매매 통계 조회 실패",
+      modeNote: "",
       rangeText: "-",
       tpText: "-",
       slText: "-",
@@ -3314,8 +3318,7 @@ if (chartIntervalEl)
 if (autoRecordTargetEl)
   autoRecordTargetEl.addEventListener("change", () => {
     saveUiState();
-    resetAutoRecordSummaryUI("대상 변경: 자동매매 기록 불러오는 중...");
-    loadAutoRecordSummary(true).catch(() => {});
+    loadAutoRecordSummary(false).catch(() => {});
   });
 if (fibToggleEl)
   fibToggleEl.addEventListener("change", () => {

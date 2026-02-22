@@ -291,6 +291,10 @@ _AUTO_TRADE_RULES_CACHE_TTL_S = max(
     60.0, float(str(os.getenv("AUTO_TRADE_RULES_CACHE_TTL_S", "900")) or "900")
 )
 _AUTO_TRADE_RULES_CACHE: Dict[str, Dict[str, Any]] = {}
+_AUTO_STATS_CACHE_TTL_S = max(
+    2.0, float(str(os.getenv("AUTO_STATS_CACHE_TTL_S", "10")) or "10")
+)
+_AUTO_STATS_CACHE: Dict[int, Dict[str, Any]] = {}
 _AUTO_ENTRY_CHASE_MAX_PCT = max(
     0.0,
     min(0.05, float(str(os.getenv("AUTO_ENTRY_CHASE_MAX_PCT", "0.012")) or "0.012")),
@@ -7796,6 +7800,14 @@ async def api_auto_trade_stats(
 ):
     public_user = await _sim_get_or_create_public_user()
     user_id = int(public_user.get("id"))
+    now_ts = time()
+    if not sync_updates:
+        cached = _AUTO_STATS_CACHE.get(user_id)
+        if isinstance(cached, dict):
+            ts = float(cached.get("ts", 0.0) or 0.0)
+            payload = cached.get("payload")
+            if isinstance(payload, dict) and (now_ts - ts) <= _AUTO_STATS_CACHE_TTL_S:
+                return payload
     if sync_updates:
         await _auto_refresh_open_records(user_id, sync_updates=True)
     try:
@@ -7915,7 +7927,7 @@ async def api_auto_trade_stats(
     by_symbol_items.sort(key=lambda x: (int(x["total"]), str(x["symbol"])), reverse=True)
     done_total = tp_cnt + sl_cnt + fail_cnt
     realized_pnl_pct = (realized_pnl / realized_seed) * 100.0 if realized_seed > 0 else 0.0
-    return {
+    resp = {
         "ok": True,
         "stats": {
             "total": total,
@@ -7934,6 +7946,11 @@ async def api_auto_trade_stats(
         },
         "by_symbol": by_symbol_items,
     }
+    _AUTO_STATS_CACHE[user_id] = {"ts": now_ts, "payload": resp}
+    if len(_AUTO_STATS_CACHE) > 64:
+        for k in list(_AUTO_STATS_CACHE.keys())[:16]:
+            _AUTO_STATS_CACHE.pop(k, None)
+    return resp
 
 
 @app.get("/api/usdt_krw")
