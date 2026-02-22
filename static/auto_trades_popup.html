@@ -303,6 +303,36 @@
         padding: 0 12px;
         font-size: 12px;
       }
+      .cfg-auth-badge {
+        display: inline-flex;
+        align-items: center;
+        max-width: 240px;
+        height: 28px;
+        border-radius: 999px;
+        border: 1px solid rgba(86, 238, 181, 0.42);
+        background: rgba(86, 238, 181, 0.14);
+        color: rgba(220, 255, 241, 0.96);
+        padding: 0 10px;
+        font-size: 11px;
+        font-weight: 760;
+        line-height: 1;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .cfg-auth-badge[hidden] {
+        display: none !important;
+      }
+      .cfg-google-logout-btn {
+        width: auto;
+        min-width: 102px;
+        height: 34px;
+        padding: 0 10px;
+        font-size: 12px;
+      }
+      .cfg-google-logout-btn[hidden] {
+        display: none !important;
+      }
       .run-toggle-btn.running {
         border-color: rgba(122, 245, 198, 0.45);
         background: rgba(122, 245, 198, 0.2);
@@ -840,6 +870,13 @@
         .run-toggle-btn {
           min-width: 108px;
         }
+        .cfg-auth-badge {
+          max-width: 168px;
+        }
+        .cfg-google-logout-btn {
+          min-width: 92px;
+          padding: 0 8px;
+        }
         .config-head .collapse-btn {
           min-width: 64px;
         }
@@ -885,6 +922,13 @@
           min-width: 98px;
           padding: 0 10px;
         }
+        .cfg-auth-badge {
+          max-width: 136px;
+        }
+        .cfg-google-logout-btn {
+          min-width: 84px;
+          padding: 0 6px;
+        }
         .config-head .collapse-btn {
           min-width: 60px;
           padding: 0 8px;
@@ -922,6 +966,8 @@
           <span id="cfgRunningSymbolChip" class="run-symbol-chip" hidden></span>
         </div>
         <div class="config-head-actions">
+          <span id="cfgAuthBadge" class="cfg-auth-badge" hidden></span>
+          <button id="cfgGoogleLogoutBtn" class="ghost cfg-google-logout-btn" type="button" hidden>구글 로그인 해제</button>
           <button id="cfgTopRunBtn" class="primary run-toggle-btn" type="button" disabled>지금 실행</button>
           <button id="cfgCollapseBtn" class="ghost collapse-btn" type="button" aria-expanded="false" aria-controls="configContent">펼치기</button>
         </div>
@@ -1177,6 +1223,6 @@
       </div>
     </div>
     <script src="https://accounts.google.com/gsi/client" async defer></script>
-    <script src="/static/auto_trades_popup.js?v=20260222r"></script>
+    <script src="/static/auto_trades_popup.js?v=20260222s"></script>
   </body>
 </html>

@@ -564,35 +564,57 @@ def _cfg_unlock_signing_secret() -> bytes:
     return raw.encode("utf-8")
 
 
-def _cfg_unlock_issue_token(exp_ms: int) -> str:
-    payload_obj = {"exp_ms": int(exp_ms)}
+def _cfg_unlock_issue_token(exp_ms: int, *, method: str = "", email: str = "") -> str:
+    m = str(method or "").strip().lower()
+    if m not in {"google", "password"}:
+        m = ""
+    e = str(email or "").strip().lower()
+    if len(e) > 160:
+        e = e[:160]
+    payload_obj: Dict[str, Any] = {"exp_ms": int(exp_ms)}
+    if m:
+        payload_obj["method"] = m
+    if e:
+        payload_obj["email"] = e
     payload_raw = json.dumps(payload_obj, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
     payload = base64.urlsafe_b64encode(payload_raw).decode("utf-8").rstrip("=")
     sig = hmac.new(_cfg_unlock_signing_secret(), payload.encode("utf-8"), hashlib.sha256).hexdigest()
     return f"v2.{payload}.{sig}"
 
 
-def _cfg_unlock_verify_token(token: str | None) -> bool:
+def _cfg_unlock_parse_token(token: str | None) -> Dict[str, Any] | None:
     raw = str(token or "").strip()
     if not raw:
-        return False
+        return None
     parts = raw.split(".")
     if len(parts) != 3 or parts[0] != "v2":
-        return False
+        return None
     payload = parts[1]
     supplied_sig = parts[2]
     expected_sig = hmac.new(_cfg_unlock_signing_secret(), payload.encode("utf-8"), hashlib.sha256).hexdigest()
     if not secrets.compare_digest(expected_sig, supplied_sig):
-        return False
+        return None
     try:
         pad = "=" * (-len(payload) % 4)
         decoded = base64.urlsafe_b64decode((payload + pad).encode("utf-8")).decode("utf-8")
         obj = json.loads(decoded)
         exp_ms = int(obj.get("exp_ms", 0) or 0)
     except Exception:
-        return False
+        return None
     now_ms = int(time() * 1000)
-    return exp_ms > now_ms
+    if exp_ms <= now_ms:
+        return None
+    if not isinstance(obj, dict):
+        return {"exp_ms": exp_ms, "method": "", "email": ""}
+    method = str(obj.get("method", "")).strip().lower()
+    if method not in {"google", "password"}:
+        method = ""
+    email = str(obj.get("email", "")).strip().lower()
+    return {"exp_ms": exp_ms, "method": method, "email": email}
+
+
+def _cfg_unlock_verify_token(token: str | None) -> bool:
+    return _cfg_unlock_parse_token(token) is not None
 
 
 def _cfg_unlock_cleanup_sessions(now_ms: int) -> None:
@@ -609,15 +631,21 @@ def _cfg_unlock_cleanup_sessions(now_ms: int) -> None:
             _CFG_UNLOCK_SESSIONS.pop(sid, None)
 
 
-def _cfg_unlock_create_session(*, ip: str, ua: str) -> tuple[str, int]:
+def _cfg_unlock_create_session(*, ip: str, ua: str, method: str = "", email: str = "") -> tuple[str, int]:
     now_ms = int(time() * 1000)
     exp_ms = now_ms + (_CFG_UNLOCK_SESSION_TTL_S * 1000)
-    sid = _cfg_unlock_issue_token(exp_ms)
+    method_v = str(method or "").strip().lower()
+    if method_v not in {"google", "password"}:
+        method_v = ""
+    email_v = str(email or "").strip().lower()
+    sid = _cfg_unlock_issue_token(exp_ms, method=method_v, email=email_v)
     _CFG_UNLOCK_SESSIONS[sid] = {
         "created_ms": now_ms,
         "exp_ms": exp_ms,
         "ip": str(ip or ""),
         "ua": str(ua or ""),
+        "method": method_v,
+        "email": email_v,
     }
     _cfg_unlock_cleanup_sessions(now_ms)
     return sid, exp_ms
@@ -639,6 +667,32 @@ def _cfg_unlock_valid_session(sid: str | None) -> bool:
         _CFG_UNLOCK_SESSIONS.pop(str(sid), None)
         return False
     return True
+
+
+def _cfg_unlock_session_info(sid: str | None) -> Dict[str, Any]:
+    out: Dict[str, Any] = {"unlocked": False, "method": "", "email": ""}
+    raw = str(sid or "").strip()
+    if not raw:
+        return out
+    parsed = _cfg_unlock_parse_token(raw)
+    if isinstance(parsed, dict):
+        out["unlocked"] = True
+        out["method"] = str(parsed.get("method", "")).strip().lower()
+        out["email"] = str(parsed.get("email", "")).strip().lower()
+        return out
+    now_ms = int(time() * 1000)
+    _cfg_unlock_cleanup_sessions(now_ms)
+    sess = _CFG_UNLOCK_SESSIONS.get(raw)
+    if not isinstance(sess, dict):
+        return out
+    exp_ms = int(sess.get("exp_ms", 0) or 0)
+    if exp_ms <= now_ms:
+        _CFG_UNLOCK_SESSIONS.pop(raw, None)
+        return out
+    out["unlocked"] = True
+    out["method"] = str(sess.get("method", "")).strip().lower()
+    out["email"] = str(sess.get("email", "")).strip().lower()
+    return out
 
 
 def _require_cfg_unlock(request: Request) -> None:
@@ -2021,9 +2075,16 @@ def api_auto_trade_config_lock_status(
 ):
     enabled = _cfg_unlock_enabled()
     unlocked = False
+    session_info: Dict[str, Any] = {"method": "", "email": ""}
     if enabled:
         sid = request.cookies.get(_CFG_UNLOCK_COOKIE_NAME)
-        unlocked = _cfg_unlock_valid_session(sid)
+        info = _cfg_unlock_session_info(sid)
+        unlocked = bool(info.get("unlocked"))
+        if unlocked:
+            session_info = {
+                "method": str(info.get("method", "")).strip().lower(),
+                "email": str(info.get("email", "")).strip().lower(),
+            }
     return {
         "ok": True,
         "enabled": enabled,
@@ -2034,6 +2095,7 @@ def api_auto_trade_config_lock_status(
             "allowed_emails": sorted(_cfg_google_allowed_emails()),
         },
         "password_enabled": _cfg_password_unlock_enabled(),
+        "session": session_info,
     }
 
 
@@ -2057,7 +2119,7 @@ def api_auto_trade_config_lock_unlock(
 
     ip = request.client.host if request.client else ""
     ua = request.headers.get("user-agent", "")
-    sid, exp_ms = _cfg_unlock_create_session(ip=ip, ua=ua)
+    sid, exp_ms = _cfg_unlock_create_session(ip=ip, ua=ua, method="password")
     resp = JSONResponse(
         {
             "ok": True,
@@ -2091,7 +2153,12 @@ def api_auto_trade_config_lock_unlock_google(
     profile = _cfg_google_verify_credential(credential)
     ip = request.client.host if request.client else ""
     ua = request.headers.get("user-agent", "")
-    sid, exp_ms = _cfg_unlock_create_session(ip=ip, ua=ua)
+    sid, exp_ms = _cfg_unlock_create_session(
+        ip=ip,
+        ua=ua,
+        method="google",
+        email=str(profile.get("email", "")).strip().lower(),
+    )
     resp = JSONResponse(
         {
             "ok": True,

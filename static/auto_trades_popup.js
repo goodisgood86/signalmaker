@@ -34,6 +34,8 @@ const cfgRunBtnEl = document.getElementById("cfgRunBtn");
 const cfgTopRunBtnEl = document.getElementById("cfgTopRunBtn");
 const cfgTopRunHintEl = document.getElementById("cfgTopRunHint");
 const cfgRunningSymbolChipEl = document.getElementById("cfgRunningSymbolChip");
+const cfgAuthBadgeEl = document.getElementById("cfgAuthBadge");
+const cfgGoogleLogoutBtnEl = document.getElementById("cfgGoogleLogoutBtn");
 const cfgStatusEl = document.getElementById("cfgStatus");
 const cfgSaveHintEl = document.getElementById("cfgSaveHint");
 const configSectionEl = document.getElementById("configSection");
@@ -108,6 +110,8 @@ let cfgGoogleLogin = { enabled: false, clientId: "", allowedEmails: [] };
 let cfgGoogleInitClientId = "";
 let cfgGoogleUnlockBusy = false;
 let cfgPasswordUnlockEnabled = true;
+let cfgUnlockSessionMethod = "";
+let cfgUnlockSessionEmail = "";
 
 function fmtPrice(v) {
   const n = Number(v);
@@ -469,6 +473,35 @@ function setCfgLockStatus(msg) {
   if (cfgLockStatusEl) cfgLockStatusEl.textContent = msg || "";
 }
 
+function setUnlockSessionInfo(session) {
+  const src = session && typeof session === "object" ? session : {};
+  const method = String(src?.method || "").trim().toLowerCase();
+  const email = String(src?.email || "").trim().toLowerCase();
+  cfgUnlockSessionMethod = method === "google" || method === "password" ? method : "";
+  cfgUnlockSessionEmail = email;
+}
+
+function clearUnlockSessionInfo() {
+  cfgUnlockSessionMethod = "";
+  cfgUnlockSessionEmail = "";
+}
+
+function updateConfigAuthUi() {
+  const inferredGoogle = isConfigUnlocked() && cfgGoogleLogin.enabled && !cfgPasswordUnlockEnabled;
+  const googleUnlocked = isConfigUnlocked() && (cfgUnlockSessionMethod === "google" || (inferredGoogle && !cfgUnlockSessionMethod));
+  if (cfgAuthBadgeEl) {
+    if (googleUnlocked) {
+      const emailTxt = String(cfgUnlockSessionEmail || "").trim();
+      cfgAuthBadgeEl.textContent = emailTxt ? `구글 로그인됨: ${emailTxt}` : "구글 로그인됨";
+      cfgAuthBadgeEl.hidden = false;
+    } else {
+      cfgAuthBadgeEl.textContent = "";
+      cfgAuthBadgeEl.hidden = true;
+    }
+  }
+  if (cfgGoogleLogoutBtnEl) cfgGoogleLogoutBtnEl.hidden = !googleUnlocked;
+}
+
 function configLockGuideText() {
   const googleEnabled = Boolean(cfgGoogleLogin?.enabled && cfgGoogleLogin?.clientId);
   const passwordEnabled = Boolean(cfgPasswordUnlockEnabled);
@@ -519,11 +552,12 @@ async function unlockByGoogleCredential(credential) {
   if (cfgGoogleUnlockBusy) return;
   setGoogleUnlockBusy(true);
   try {
-    await fetchJSON("/api/auto_trade/config_lock/unlock/google", {
+    const data = await fetchJSON("/api/auto_trade/config_lock/unlock/google", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ credential: token }),
     });
+    setUnlockSessionInfo({ method: String(data?.method || "google"), email: String(data?.email || "") });
     setConfigLocked(false);
     setCfgLockStatus("구글 로그인으로 잠금이 해제되었습니다.");
     await Promise.all([loadConfig(), loadBinanceLink()]);
@@ -584,6 +618,8 @@ function setConfigLocked(locked) {
   configSectionEl.classList.toggle("is-locked", isLocked);
   configUnlocked = !isLocked;
   if (cfgEnabledEl) cfgEnabledEl.disabled = isLocked;
+  if (isLocked) clearUnlockSessionInfo();
+  updateConfigAuthUi();
   updateTopRunButton();
 }
 
@@ -816,6 +852,7 @@ async function loadConfigLockStatus() {
       allowedEmails: Array.isArray(google?.allowed_emails) ? google.allowed_emails : [],
     };
     cfgPasswordUnlockEnabled = data?.password_enabled !== false;
+    setUnlockSessionInfo(data?.session || {});
     applyConfigLockMethodUi();
     renderGoogleUnlockButton();
     setConfigLocked(!unlocked);
@@ -831,6 +868,20 @@ async function loadConfigLockStatus() {
     const msg = errMessage(e);
     setConfigLocked(true);
     setCfgLockStatus(`잠금 상태 조회 실패: ${msg}`);
+  }
+}
+
+async function lockConfigSession() {
+  try {
+    await fetchJSON("/api/auto_trade/config_lock/lock", { method: "POST" });
+    setConfigLocked(true);
+    setCfgLockStatus(lockPromptText());
+    try {
+      if (window.google?.accounts?.id?.disableAutoSelect) window.google.accounts.id.disableAutoSelect();
+    } catch (_) {}
+  } catch (e) {
+    const msg = errMessage(e);
+    setCfgLockStatus(`로그아웃 실패: ${msg}`);
   }
 }
 
@@ -1408,6 +1459,7 @@ async function tryUnlockConfig() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ password: inputValue }),
     });
+    setUnlockSessionInfo({ method: "password", email: "" });
     setConfigLocked(false);
     setCfgLockStatus("");
     if (cfgUnlockInputEl) cfgUnlockInputEl.value = "";
@@ -1514,6 +1566,10 @@ if (cfgUnlockInputEl)
     if (ev.key !== "Enter") return;
     ev.preventDefault();
     tryUnlockConfig().catch(() => {});
+  });
+if (cfgGoogleLogoutBtnEl)
+  cfgGoogleLogoutBtnEl.addEventListener("click", () => {
+    lockConfigSession().catch(() => {});
   });
 if (cfgCollapseBtnEl) cfgCollapseBtnEl.addEventListener("click", () => toggleConfigCollapsed());
 if (bnLinkBtnEl) bnLinkBtnEl.addEventListener("click", () => linkBinance());
