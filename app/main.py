@@ -2183,6 +2183,54 @@ def api_auto_trade_config_lock_unlock_google(
     return resp
 
 
+@app.post("/api/auto_trade/config_lock/unlock/google/callback")
+async def api_auto_trade_config_lock_unlock_google_callback(
+    request: Request,
+):
+    # 모바일/팝업 차단 환경에서 GIS redirect 모드를 사용하기 위한 콜백.
+    form = await request.form()
+    credential = str(form.get("credential", "") or "").strip()
+    fail_reason = ""
+    if not _cfg_google_enabled():
+        fail_reason = "google login is not configured"
+    elif not credential:
+        fail_reason = "google credential is missing"
+
+    redirect_base = "/static/auto_trades_popup.html"
+    if fail_reason:
+        qs = urlencode({"google_unlock": "fail", "reason": fail_reason})
+        return RedirectResponse(url=f"{redirect_base}?{qs}", status_code=303)
+
+    try:
+        profile = _cfg_google_verify_credential(credential)
+        ip = request.client.host if request.client else ""
+        ua = request.headers.get("user-agent", "")
+        sid, _exp_ms = _cfg_unlock_create_session(
+            ip=ip,
+            ua=ua,
+            method="google",
+            email=str(profile.get("email", "")).strip().lower(),
+        )
+        qs = urlencode({"google_unlock": "ok"})
+        resp = RedirectResponse(url=f"{redirect_base}?{qs}", status_code=303)
+        cookie_domain = _cookie_domain_for_request(request)
+        resp.set_cookie(
+            key=_CFG_UNLOCK_COOKIE_NAME,
+            value=sid,
+            max_age=_CFG_UNLOCK_SESSION_TTL_S,
+            httponly=True,
+            samesite="lax",
+            secure=bool(request.url.scheme == "https"),
+            path="/",
+            domain=cookie_domain,
+        )
+        return resp
+    except HTTPException as e:
+        reason = str(e.detail or "google login failed")
+        qs = urlencode({"google_unlock": "fail", "reason": reason})
+        return RedirectResponse(url=f"{redirect_base}?{qs}", status_code=303)
+
+
 @app.post("/api/auto_trade/config_lock/lock")
 def api_auto_trade_config_lock_lock(
     request: Request,

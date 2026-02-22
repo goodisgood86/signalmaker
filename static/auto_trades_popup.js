@@ -119,11 +119,14 @@ let runningSymbol = "ALL";
 let latestTickStatusText = "";
 let cfgGoogleLogin = { enabled: false, clientId: "", allowedEmails: [] };
 let cfgGoogleInitClientId = "";
+let cfgGoogleInitUxMode = "";
 let cfgGoogleUnlockBusy = false;
 let cfgPasswordUnlockEnabled = true;
 let cfgUnlockSessionMethod = "";
 let cfgUnlockSessionEmail = "";
 let centerGoogleSessionActionBusy = false;
+let googleRedirectResult = "";
+let googleRedirectReason = "";
 
 function fmtPrice(v) {
   const n = Number(v);
@@ -502,6 +505,26 @@ function clearUnlockSessionInfo() {
   cfgUnlockSessionEmail = "";
 }
 
+function isLikelyMobileClient() {
+  const ua = String(navigator?.userAgent || "");
+  return /Android|iPhone|iPad|iPod|Mobile|IEMobile|Opera Mini/i.test(ua);
+}
+
+function consumeGoogleRedirectResult() {
+  try {
+    const url = new URL(window.location.href);
+    const result = String(url.searchParams.get("google_unlock") || "").trim().toLowerCase();
+    const reason = String(url.searchParams.get("reason") || "").trim();
+    if (!result) return;
+    googleRedirectResult = result;
+    googleRedirectReason = reason;
+    url.searchParams.delete("google_unlock");
+    url.searchParams.delete("reason");
+    const next = `${url.pathname}${url.search}${url.hash}`;
+    history.replaceState(null, "", next || url.pathname);
+  } catch (_) {}
+}
+
 function isGoogleSessionUnlocked() {
   const inferredGoogle = isConfigUnlocked() && cfgGoogleLogin.enabled && !cfgPasswordUnlockEnabled;
   return isConfigUnlocked() && (cfgUnlockSessionMethod === "google" || (inferredGoogle && !cfgUnlockSessionMethod));
@@ -670,16 +693,25 @@ function renderGoogleUnlockButton(retry = 0) {
     tidyFrame();
   };
   try {
-    if (cfgGoogleInitClientId !== cfgGoogleLogin.clientId) {
-      window.google.accounts.id.initialize({
+    const useRedirect = isLikelyMobileClient();
+    const nextUxMode = useRedirect ? "redirect" : "popup";
+    if (cfgGoogleInitClientId !== cfgGoogleLogin.clientId || cfgGoogleInitUxMode !== nextUxMode) {
+      const initOptions = {
         client_id: cfgGoogleLogin.clientId,
         use_fedcm_for_button: false,
         button_auto_select: false,
-        callback: (resp) => {
+        ux_mode: nextUxMode,
+      };
+      if (useRedirect) {
+        initOptions.login_uri = `${window.location.origin}/api/auto_trade/config_lock/unlock/google/callback`;
+      } else {
+        initOptions.callback = (resp) => {
           unlockByGoogleCredential(resp?.credential || "").catch(() => {});
-        },
-      });
+        };
+      }
+      window.google.accounts.id.initialize(initOptions);
       cfgGoogleInitClientId = cfgGoogleLogin.clientId;
+      cfgGoogleInitUxMode = nextUxMode;
     }
     renderInto(cfgGoogleBtnEl);
     renderInto(centerGoogleModalBtnEl);
@@ -977,6 +1009,20 @@ async function loadConfigLockStatus() {
     renderGoogleUnlockButton();
     setConfigLocked(!unlocked);
     updateCenterGoogleModalUi();
+    if (googleRedirectResult === "ok") {
+      setCfgLockStatus("");
+      setTopHint("구글 연동이 완료되었습니다.");
+      setCenterGoogleModalNote("구글 연동 완료", "ok");
+      googleRedirectResult = "";
+      googleRedirectReason = "";
+    } else if (googleRedirectResult === "fail") {
+      const reason = String(googleRedirectReason || "google login failed");
+      setCfgLockStatus(`구글 로그인 실패: ${reason}`);
+      setTopHint(`구글 로그인 실패: ${reason}`);
+      setCenterGoogleModalNote(`로그인 실패: ${reason}`, "warn");
+      googleRedirectResult = "";
+      googleRedirectReason = "";
+    }
     await loadRuntimeStatus();
     await loadBinanceLink();
     if (!unlocked) {
@@ -1813,6 +1859,7 @@ window.addEventListener("keydown", (ev) => {
 
 initFilters();
 initConfigInputs();
+consumeGoogleRedirectResult();
 initConfigLock();
 if (recordsBodyEl) recordsBodyEl.innerHTML = `<tr><td colspan="11" class="records-num">불러오는 중...</td></tr>`;
 Promise.all([load(), loadStats()]).catch((e) => alert(e.message || e));
