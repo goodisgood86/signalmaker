@@ -2183,13 +2183,30 @@ def api_auto_trade_config_lock_unlock_google(
     return resp
 
 
+@app.get("/api/auto_trade/config_lock/unlock/google/callback")
 @app.post("/api/auto_trade/config_lock/unlock/google/callback")
 async def api_auto_trade_config_lock_unlock_google_callback(
     request: Request,
 ):
     # 모바일/팝업 차단 환경에서 GIS redirect 모드를 사용하기 위한 콜백.
-    form = await request.form()
-    credential = str(form.get("credential", "") or "").strip()
+    credential = ""
+    try:
+        content_type = str(request.headers.get("content-type", "") or "").lower()
+        if "application/json" in content_type:
+            payload = await request.json()
+            if isinstance(payload, dict):
+                credential = str(payload.get("credential", "") or "").strip()
+        else:
+            body_raw = (await request.body()).decode("utf-8", errors="ignore")
+            if body_raw:
+                parsed = parse_qs(body_raw, keep_blank_values=False)
+                vals = parsed.get("credential") or []
+                if vals:
+                    credential = str(vals[0] or "").strip()
+    except Exception:
+        credential = ""
+    if not credential:
+        credential = str(request.query_params.get("credential", "") or "").strip()
     fail_reason = ""
     if not _cfg_google_enabled():
         fail_reason = "google login is not configured"
