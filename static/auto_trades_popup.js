@@ -381,6 +381,23 @@ function leverageText(row) {
   return `${norm}x`;
 }
 
+function effectiveSeedUsdt(row) {
+  const fromApi = Number(row?.seed_usdt);
+  if (Number.isFinite(fromApi) && fromApi > 0) return fromApi;
+  const notional = Number(row?.notional_usdt || 0);
+  if (!Number.isFinite(notional) || notional <= 0) return NaN;
+  const market = normalizeMarketValue(row?.market);
+  if (market !== "futures") return notional;
+  let lev = Number(row?.futures_leverage);
+  if (!Number.isFinite(lev) || lev <= 0) {
+    const reasonState = reasonStateFromRecord(row);
+    lev = Number(reasonState?.futures_leverage);
+  }
+  if (!Number.isFinite(lev) || lev <= 0) lev = 1;
+  const seed = notional / Math.max(1, lev);
+  return Number.isFinite(seed) && seed > 0 ? seed : NaN;
+}
+
 function normalizeTradeSymbol(symbol) {
   const s = String(symbol || "").toUpperCase();
   return RUN_SYMBOLS.includes(s) ? s : "ALL";
@@ -1589,7 +1606,7 @@ function render(records) {
   recordsBodyEl.innerHTML = rows
     .map((r) => {
       const st = statusMeta(r);
-      const seed = Number(r?.notional_usdt || 0);
+      const seed = effectiveSeedUsdt(r);
       const seedTxt = Number.isFinite(seed)
         ? `${seed.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDT`
         : "-";

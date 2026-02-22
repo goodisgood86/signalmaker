@@ -2850,6 +2850,35 @@ def _auto_reason_unpack(reason: Any, record: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _auto_record_effective_seed_usdt(record: Dict[str, Any]) -> float:
+    try:
+        notional = float(record.get("notional_usdt", 0.0) or 0.0)
+    except Exception:
+        notional = 0.0
+    if (not math.isfinite(notional)) or notional <= 0:
+        return 0.0
+    market = str(record.get("market", "")).strip().lower()
+    if market != "futures":
+        return float(notional)
+    lev = 0.0
+    try:
+        lev = float(record.get("futures_leverage", 0.0) or 0.0)
+    except Exception:
+        lev = 0.0
+    if (not math.isfinite(lev)) or lev <= 0:
+        state = _auto_reason_unpack(record.get("reason"), record)
+        try:
+            lev = float(state.get("futures_leverage", 0.0) or 0.0)
+        except Exception:
+            lev = 0.0
+    if (not math.isfinite(lev)) or lev <= 0:
+        lev = 1.0
+    seed = notional / max(1.0, lev)
+    if (not math.isfinite(seed)) or seed < 0:
+        return 0.0
+    return float(seed)
+
+
 def _auto_build_fib_trade_plan(
     *,
     side: str,
@@ -7483,7 +7512,11 @@ async def api_auto_trade_records(
         raise
     items = rows if isinstance(rows, list) else []
     has_next = len(items) > per_page
-    page_rows = items[:per_page]
+    page_rows: List[Dict[str, Any]] = []
+    for row in items[:per_page]:
+        rec = dict(row) if isinstance(row, dict) else {}
+        rec["seed_usdt"] = round(_auto_record_effective_seed_usdt(rec), 4)
+        page_rows.append(rec)
     return {"ok": True, "records": page_rows, "page": int(page), "limit": per_page, "has_next": has_next}
 
 
@@ -7546,7 +7579,7 @@ async def api_auto_trade_stats(
             "GET",
             "/rest/v1/auto_trade_records",
             params={
-                "select": "id,symbol,status,pnl_usdt,notional_usdt,opened_ms,closed_ms",
+                "select": "id,symbol,market,status,pnl_usdt,notional_usdt,reason,opened_ms,closed_ms",
                 "user_id": f"eq.{user_id}",
                 "order": "opened_ms.desc",
                 "limit": "5000",
@@ -7564,6 +7597,7 @@ async def api_auto_trade_stats(
     fail_cnt = 0
     realized_pnl = 0.0
     realized_notional = 0.0
+    realized_seed = 0.0
     now_ms = int(time() * 1000)
     day_start_ms = _kst_day_start_ms(now_ms)
     today_pnl = 0.0
@@ -7587,6 +7621,7 @@ async def api_auto_trade_stats(
         sym = str(r.get("symbol", "")).upper()
         pnl = float(r.get("pnl_usdt", 0.0) or 0.0)
         notional = float(r.get("notional_usdt", 0.0) or 0.0)
+        seed = _auto_record_effective_seed_usdt(r)
         closed_ms = int(r.get("closed_ms", 0) or 0)
         outcome = _closed_outcome(status, pnl)
         if outcome == "OPEN":
@@ -7601,6 +7636,8 @@ async def api_auto_trade_stats(
             realized_pnl += pnl
             if math.isfinite(notional) and notional > 0:
                 realized_notional += notional
+            if math.isfinite(seed) and seed > 0:
+                realized_seed += seed
             if closed_ms >= day_start_ms:
                 today_pnl += pnl
 
@@ -7637,7 +7674,7 @@ async def api_auto_trade_stats(
         a["win_rate"] = round((float(a["tp"]) / done) * 100.0, 1) if done > 0 else 0.0
     by_symbol_items.sort(key=lambda x: (int(x["total"]), str(x["symbol"])), reverse=True)
     done_total = tp_cnt + sl_cnt + fail_cnt
-    realized_pnl_pct = (realized_pnl / realized_notional) * 100.0 if realized_notional > 0 else 0.0
+    realized_pnl_pct = (realized_pnl / realized_seed) * 100.0 if realized_seed > 0 else 0.0
     return {
         "ok": True,
         "stats": {
@@ -7649,6 +7686,7 @@ async def api_auto_trade_stats(
             "win_rate": round((float(tp_cnt) / done_total) * 100.0, 1) if done_total > 0 else 0.0,
             "realized_pnl_usdt": round(realized_pnl, 4),
             "realized_basis_notional_usdt": round(realized_notional, 4),
+            "realized_basis_seed_usdt": round(realized_seed, 4),
             "realized_pnl_pct": round(realized_pnl_pct, 2),
             "today_realized_pnl_usdt": round(today_pnl, 4),
         },
