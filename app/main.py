@@ -246,6 +246,7 @@ _AUTO_LINK_STATUS = {"CONNECTED"}
 _AUTO_SYMBOL_SCAN_ORDER = ["BTCUSDT", "ETHUSDT", "XRPUSDT", "DOGEUSDT", "SUIUSDT", "SOLUSDT", "CROSSUSDT"]
 _AUTO_ALLOWED_SYMBOLS = set(_AUTO_SYMBOL_SCAN_ORDER)
 _AUTO_SCAN_BATCH_SIZE = max(2, min(3, int(str(os.getenv("AUTO_SCAN_BATCH_SIZE", "3")) or "3")))
+_AUTO_MAX_OPEN_POSITIONS = max(1, min(200, int(str(os.getenv("AUTO_MAX_OPEN_POSITIONS", "200")) or "200")))
 _AUTH_COOKIE_NAME = "coin_auth_session"
 _AUTH_SESSION_TTL_S = max(1800, int(str(os.getenv("APP_AUTH_SESSION_TTL_S", "43200")) or "43200"))
 _AUTH_SESSIONS_MAX = max(64, int(str(os.getenv("APP_AUTH_SESSIONS_MAX", "512")) or "512"))
@@ -2631,7 +2632,7 @@ def _auto_normalize_config(raw: Dict[str, Any] | None) -> Dict[str, Any]:
     )
     out["cooldown_min"] = int(_auto_clip_number(src.get("cooldown_min"), 0.0, 720.0, float(base["cooldown_min"])))
     out["max_open_positions"] = int(
-        _auto_clip_number(src.get("max_open_positions"), 1.0, 5.0, float(base["max_open_positions"]))
+        _auto_clip_number(src.get("max_open_positions"), 1.0, float(_AUTO_MAX_OPEN_POSITIONS), float(base["max_open_positions"]))
     )
     out["last_run_ms"] = int(_auto_clip_number(src.get("last_run_ms"), 0.0, 10**15, float(base["last_run_ms"])))
     return out
@@ -5944,8 +5945,11 @@ def _auto_validate_config_required_fields(cfg: Dict[str, Any]) -> None:
         raise HTTPException(status_code=400, detail="설정 저장 불가: 일 최대 손실은 1 이상이어야 합니다.")
     if futures_leverage < 1 or futures_leverage > 50:
         raise HTTPException(status_code=400, detail="설정 저장 불가: 선물 배수는 1~50 범위여야 합니다.")
-    if max_open < 1 or max_open > 5:
-        raise HTTPException(status_code=400, detail="설정 저장 불가: 동시 최대 포지션은 1~5 범위여야 합니다.")
+    if max_open < 1 or max_open > _AUTO_MAX_OPEN_POSITIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"설정 저장 불가: 동시 최대 포지션은 1~{_AUTO_MAX_OPEN_POSITIONS} 범위여야 합니다.",
+        )
     tp_pct = float(cfg.get("take_profit_pct", 0.0) or 0.0)
     sl_pct = float(cfg.get("stop_loss_pct", 0.0) or 0.0)
     if tp_pct < 0 or sl_pct < 0:

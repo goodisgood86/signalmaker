@@ -93,6 +93,7 @@ const STATUSES = [
   { v: "SL", t: "손절" },
   { v: "CLOSED_FAIL", t: "시간종료" },
 ];
+const MAX_OPEN_POSITIONS_LIMIT = 200;
 
 let page = 1;
 let hasNext = false;
@@ -960,7 +961,7 @@ function clampMaxOpenInput() {
     cfgMaxOpenEl.value = "2";
     return 2;
   }
-  const clamped = Math.max(1, Math.min(5, Math.round(n)));
+  const clamped = Math.max(1, Math.min(MAX_OPEN_POSITIONS_LIMIT, Math.round(n)));
   cfgMaxOpenEl.value = String(clamped);
   return clamped;
 }
@@ -1196,7 +1197,7 @@ function applyConfig(cfg) {
   if (cfgCooldownMinEl) cfgCooldownMinEl.value = "0";
   if (cfgMaxOpenEl) {
     const maxOpen = Number(cfg.max_open_positions || 2);
-    cfgMaxOpenEl.value = String(Math.max(1, Math.min(5, Math.round(maxOpen))));
+    cfgMaxOpenEl.value = String(Math.max(1, Math.min(MAX_OPEN_POSITIONS_LIMIT, Math.round(maxOpen))));
   }
   setConfigDirty(false);
   evaluateCollateralState();
@@ -1256,7 +1257,9 @@ function validateConfigForSave(payload) {
   if (!["balanced", "aggressive"].includes(mode)) missing.push("투자모드");
   if (!Number.isFinite(orderSize) || orderSize < 10) missing.push("1회 거래금액 (10 이상)");
   if (!Number.isFinite(dailyLoss) || dailyLoss < 1) missing.push("일 최대 손실 (1 이상)");
-  if (!Number.isFinite(maxOpen) || maxOpen < 1 || maxOpen > 5) missing.push("동시 최대 포지션 (1~5)");
+  if (!Number.isFinite(maxOpen) || maxOpen < 1 || maxOpen > MAX_OPEN_POSITIONS_LIMIT) {
+    missing.push(`동시 최대 포지션 (1~${MAX_OPEN_POSITIONS_LIMIT})`);
+  }
   if (tpMode === "manual" && (!Number.isFinite(tpPctInput) || tpPctInput <= 0)) {
     missing.push("익절 TP (%)");
   }
