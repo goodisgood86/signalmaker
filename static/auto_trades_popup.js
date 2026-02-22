@@ -34,8 +34,7 @@ const cfgRunBtnEl = document.getElementById("cfgRunBtn");
 const cfgTopRunBtnEl = document.getElementById("cfgTopRunBtn");
 const cfgTopRunHintEl = document.getElementById("cfgTopRunHint");
 const cfgRunningSymbolChipEl = document.getElementById("cfgRunningSymbolChip");
-const cfgAuthBadgeEl = document.getElementById("cfgAuthBadge");
-const cfgGoogleLogoutBtnEl = document.getElementById("cfgGoogleLogoutBtn");
+const centerGoogleAuthBtnEl = document.getElementById("centerGoogleAuthBtn");
 const cfgStatusEl = document.getElementById("cfgStatus");
 const cfgSaveHintEl = document.getElementById("cfgSaveHint");
 const configSectionEl = document.getElementById("configSection");
@@ -473,6 +472,10 @@ function setCfgLockStatus(msg) {
   if (cfgLockStatusEl) cfgLockStatusEl.textContent = msg || "";
 }
 
+function setTopHint(msg) {
+  if (cfgTopRunHintEl && msg) cfgTopRunHintEl.textContent = msg;
+}
+
 function setUnlockSessionInfo(session) {
   const src = session && typeof session === "object" ? session : {};
   const method = String(src?.method || "").trim().toLowerCase();
@@ -486,27 +489,29 @@ function clearUnlockSessionInfo() {
   cfgUnlockSessionEmail = "";
 }
 
-function updateConfigAuthUi() {
+function isGoogleSessionUnlocked() {
   const inferredGoogle = isConfigUnlocked() && cfgGoogleLogin.enabled && !cfgPasswordUnlockEnabled;
-  const googleUnlocked = isConfigUnlocked() && (cfgUnlockSessionMethod === "google" || (inferredGoogle && !cfgUnlockSessionMethod));
-  if (cfgAuthBadgeEl) {
-    if (googleUnlocked) {
-      const emailTxt = String(cfgUnlockSessionEmail || "").trim();
-      cfgAuthBadgeEl.textContent = emailTxt ? `구글 로그인됨: ${emailTxt}` : "구글 로그인됨";
-      cfgAuthBadgeEl.hidden = false;
-    } else {
-      cfgAuthBadgeEl.textContent = "";
-      cfgAuthBadgeEl.hidden = true;
-    }
+  return isConfigUnlocked() && (cfgUnlockSessionMethod === "google" || (inferredGoogle && !cfgUnlockSessionMethod));
+}
+
+function updateCenterGoogleAuthButton() {
+  if (!centerGoogleAuthBtnEl) return;
+  const linked = isGoogleSessionUnlocked();
+  centerGoogleAuthBtnEl.classList.toggle("linked", linked);
+  centerGoogleAuthBtnEl.textContent = linked ? "구글 연동 중" : "구글 연동";
+  if (linked) {
+    const emailTxt = String(cfgUnlockSessionEmail || "").trim();
+    centerGoogleAuthBtnEl.title = emailTxt ? `연동 계정: ${emailTxt}\n클릭하면 연동 해제` : "클릭하면 연동 해제";
+  } else {
+    centerGoogleAuthBtnEl.title = "클릭하면 구글 로그인 화면이 열립니다.";
   }
-  if (cfgGoogleLogoutBtnEl) cfgGoogleLogoutBtnEl.hidden = !googleUnlocked;
 }
 
 function configLockGuideText() {
   const googleEnabled = Boolean(cfgGoogleLogin?.enabled && cfgGoogleLogin?.clientId);
   const passwordEnabled = Boolean(cfgPasswordUnlockEnabled);
-  if (googleEnabled && passwordEnabled) return "구글 로그인 또는 비밀번호 입력 후 자동매매 설정을 변경할 수 있습니다.";
-  if (googleEnabled) return "허용된 구글 계정 로그인 후 자동매매 설정을 변경할 수 있습니다.";
+  if (googleEnabled && passwordEnabled) return "상단 구글 연동 또는 비밀번호 입력 후 자동매매 설정을 변경할 수 있습니다.";
+  if (googleEnabled) return "상단 구글 연동 버튼으로 로그인 후 자동매매 설정을 변경할 수 있습니다.";
   if (passwordEnabled) return "비밀번호 입력 후 자동매매 설정을 변경할 수 있습니다.";
   return "잠금 해제 방법이 비활성화되어 있습니다. 관리자에게 문의해주세요.";
 }
@@ -560,11 +565,13 @@ async function unlockByGoogleCredential(credential) {
     setUnlockSessionInfo({ method: String(data?.method || "google"), email: String(data?.email || "") });
     setConfigLocked(false);
     setCfgLockStatus("구글 로그인으로 잠금이 해제되었습니다.");
+    setTopHint("구글 연동 완료. 펼치기 후 설정을 변경할 수 있습니다.");
     await Promise.all([loadConfig(), loadBinanceLink()]);
   } catch (e) {
     const msg = errMessage(e);
     setConfigLocked(true);
     setCfgLockStatus(`구글 로그인 실패: ${msg}`);
+    setTopHint(`구글 로그인 실패: ${msg}`);
   } finally {
     setGoogleUnlockBusy(false);
   }
@@ -572,7 +579,7 @@ async function unlockByGoogleCredential(credential) {
 
 function renderGoogleUnlockButton(retry = 0) {
   const googleEnabled = Boolean(cfgGoogleLogin?.enabled && cfgGoogleLogin?.clientId);
-  if (!googleEnabled || !cfgGoogleBtnEl) return;
+  if (!googleEnabled) return;
   if (!(window.google && window.google.accounts && window.google.accounts.id)) {
     if (cfgGoogleHintEl && !String(cfgGoogleHintEl.textContent || "").includes("구글 로그인")) {
       const base = String(cfgGoogleHintEl.textContent || "").trim();
@@ -593,17 +600,19 @@ function renderGoogleUnlockButton(retry = 0) {
       });
       cfgGoogleInitClientId = cfgGoogleLogin.clientId;
     }
-    cfgGoogleBtnEl.innerHTML = "";
-    const btnWidth = Math.max(180, Math.min(320, Math.round(cfgGoogleBtnEl.getBoundingClientRect().width || 260)));
-    window.google.accounts.id.renderButton(cfgGoogleBtnEl, {
-      type: "standard",
-      theme: "filled_black",
-      size: "large",
-      text: "signin_with",
-      shape: "pill",
-      width: btnWidth,
-      locale: "ko",
-    });
+    if (cfgGoogleBtnEl) {
+      cfgGoogleBtnEl.innerHTML = "";
+      const btnWidth = Math.max(180, Math.min(320, Math.round(cfgGoogleBtnEl.getBoundingClientRect().width || 260)));
+      window.google.accounts.id.renderButton(cfgGoogleBtnEl, {
+        type: "standard",
+        theme: "filled_black",
+        size: "large",
+        text: "signin_with",
+        shape: "pill",
+        width: btnWidth,
+        locale: "ko",
+      });
+    }
   } catch (_) {
     if (cfgGoogleHintEl) {
       const base = String(cfgGoogleHintEl.textContent || "").trim();
@@ -612,14 +621,52 @@ function renderGoogleUnlockButton(retry = 0) {
   }
 }
 
+function openGoogleLoginPrompt(retry = 0) {
+  const googleEnabled = Boolean(cfgGoogleLogin?.enabled && cfgGoogleLogin?.clientId);
+  if (!googleEnabled) {
+    setCfgLockStatus("구글 연동이 설정되지 않았습니다.");
+    setTopHint("구글 연동이 설정되지 않았습니다.");
+    return;
+  }
+  renderGoogleUnlockButton();
+  const id = window.google?.accounts?.id;
+  if (!id) {
+    setCfgLockStatus("구글 로그인 모듈 로딩 중입니다. 잠시 후 다시 시도해주세요.");
+    setTopHint("구글 로그인 모듈 로딩 중입니다. 잠시 후 다시 시도해주세요.");
+    if (retry < 10) {
+      setTimeout(() => openGoogleLoginPrompt(retry + 1), 250);
+    }
+    return;
+  }
+  try {
+    id.prompt((notification) => {
+      try {
+        if (notification?.isNotDisplayed?.() || notification?.isSkippedMoment?.()) {
+          setCfgLockStatus("구글 로그인 창이 표시되지 않았습니다. 브라우저 팝업 차단을 확인해주세요.");
+          setTopHint("구글 로그인 창이 표시되지 않았습니다. 브라우저 팝업 차단을 확인해주세요.");
+        }
+      } catch (_) {}
+    });
+  } catch (_) {
+    setCfgLockStatus("구글 로그인 창을 열지 못했습니다. 다시 시도해주세요.");
+    setTopHint("구글 로그인 창을 열지 못했습니다. 다시 시도해주세요.");
+  }
+}
+
 function setConfigLocked(locked) {
   if (!configSectionEl) return;
   const isLocked = Boolean(locked);
   configSectionEl.classList.toggle("is-locked", isLocked);
   configUnlocked = !isLocked;
+  if (isLocked) setConfigCollapsed(true);
   if (cfgEnabledEl) cfgEnabledEl.disabled = isLocked;
+  if (cfgCollapseBtnEl) {
+    cfgCollapseBtnEl.disabled = isLocked;
+    cfgCollapseBtnEl.classList.toggle("is-disabled", isLocked);
+    cfgCollapseBtnEl.title = isLocked ? "상단 구글 연동 후 펼칠 수 있습니다." : "";
+  }
   if (isLocked) clearUnlockSessionInfo();
-  updateConfigAuthUi();
+  updateCenterGoogleAuthButton();
   updateTopRunButton();
 }
 
@@ -674,7 +721,7 @@ function updateTopRunButton() {
   if (autoRunActive) {
     cfgTopRunBtnEl.textContent = "자동매매 진행 중";
     cfgTopRunBtnEl.disabled = locked;
-    if (locked) runDisabledReason = "설정 잠금 해제 후 중지할 수 있습니다.";
+    if (locked) runDisabledReason = "상단 구글 연동 후 변경할 수 있습니다.";
     cfgTopRunBtnEl.classList.toggle("is-disabled", cfgTopRunBtnEl.disabled);
     cfgTopRunBtnEl.title = runDisabledReason;
     if (cfgTopRunHintEl) cfgTopRunHintEl.textContent = latestTickStatusText || runDisabledReason;
@@ -683,7 +730,7 @@ function updateTopRunButton() {
   }
   cfgTopRunBtnEl.textContent = "지금 실행";
   cfgTopRunBtnEl.disabled = locked || configDirty;
-  if (locked) runDisabledReason = "설정 잠금 해제 후 실행할 수 있습니다.";
+  if (locked) runDisabledReason = "상단 구글 연동 후 실행할 수 있습니다.";
   else if (configDirty) runDisabledReason = "설정 저장 완료 후 실행할 수 있습니다.";
   cfgTopRunBtnEl.classList.toggle("is-disabled", cfgTopRunBtnEl.disabled);
   cfgTopRunBtnEl.title = runDisabledReason;
@@ -703,7 +750,7 @@ function updateSaveButtonState() {
   let saveDisabledReason = "";
   cfgSaveBtnEl.disabled = locked || running;
   if (running) saveDisabledReason = "자동매매 진행 중에는 설정 저장이 비활성화됩니다.";
-  else if (locked) saveDisabledReason = "설정 잠금 해제 후 저장할 수 있습니다.";
+  else if (locked) saveDisabledReason = "상단 구글 연동 후 저장할 수 있습니다.";
   cfgSaveBtnEl.classList.toggle("is-disabled", cfgSaveBtnEl.disabled);
   cfgSaveBtnEl.title = saveDisabledReason;
   if (cfgSaveHintEl) {
@@ -826,8 +873,8 @@ function errMessage(err) {
 function lockPromptText() {
   const googleEnabled = Boolean(cfgGoogleLogin?.enabled && cfgGoogleLogin?.clientId);
   const passwordEnabled = Boolean(cfgPasswordUnlockEnabled);
-  if (googleEnabled && passwordEnabled) return "먼저 구글 로그인 또는 비밀번호를 입력해주세요.";
-  if (googleEnabled) return "먼저 허용된 구글 계정으로 로그인해주세요.";
+  if (googleEnabled && passwordEnabled) return "먼저 상단 구글 연동 또는 비밀번호를 입력해주세요.";
+  if (googleEnabled) return "먼저 상단 구글 연동 버튼으로 로그인해주세요.";
   if (passwordEnabled) return "먼저 비밀번호를 입력해주세요.";
   return "잠금 해제 방법이 비활성화되어 있습니다. 관리자에게 문의해주세요.";
 }
@@ -876,6 +923,7 @@ async function lockConfigSession() {
     await fetchJSON("/api/auto_trade/config_lock/lock", { method: "POST" });
     setConfigLocked(true);
     setCfgLockStatus(lockPromptText());
+    setTopHint("구글 연동이 해제되었습니다.");
     try {
       if (window.google?.accounts?.id?.disableAutoSelect) window.google.accounts.id.disableAutoSelect();
     } catch (_) {}
@@ -883,6 +931,14 @@ async function lockConfigSession() {
     const msg = errMessage(e);
     setCfgLockStatus(`로그아웃 실패: ${msg}`);
   }
+}
+
+async function onCenterGoogleAuthClick() {
+  if (isGoogleSessionUnlocked()) {
+    await lockConfigSession();
+    return;
+  }
+  openGoogleLoginPrompt();
 }
 
 async function loadRuntimeStatus() {
@@ -1444,7 +1500,7 @@ function initConfigLock() {
 
 async function tryUnlockConfig() {
   if (!cfgPasswordUnlockEnabled) {
-    setCfgLockStatus("비밀번호 잠금해제는 비활성화되어 있습니다. 구글 로그인으로 해제해주세요.");
+    setCfgLockStatus("비밀번호 잠금해제는 비활성화되어 있습니다. 상단 구글 연동 버튼으로 해제해주세요.");
     return;
   }
   const inputValue = String(cfgUnlockInputEl?.value || "");
@@ -1567,9 +1623,9 @@ if (cfgUnlockInputEl)
     ev.preventDefault();
     tryUnlockConfig().catch(() => {});
   });
-if (cfgGoogleLogoutBtnEl)
-  cfgGoogleLogoutBtnEl.addEventListener("click", () => {
-    lockConfigSession().catch(() => {});
+if (centerGoogleAuthBtnEl)
+  centerGoogleAuthBtnEl.addEventListener("click", () => {
+    onCenterGoogleAuthClick().catch(() => {});
   });
 if (cfgCollapseBtnEl) cfgCollapseBtnEl.addEventListener("click", () => toggleConfigCollapsed());
 if (bnLinkBtnEl) bnLinkBtnEl.addEventListener("click", () => linkBinance());
