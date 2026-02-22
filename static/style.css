@@ -1297,6 +1297,27 @@ button:hover {
   word-break: keep-all;
 }
 
+/* 최근 자동매매 기록 헤더는 타이틀과 대상 셀렉트를 한 줄 정렬로 유지 */
+@media (min-width: 641px) {
+  #autoRecordSummary .passcheck-head {
+    align-items: center;
+    flex-direction: row;
+    gap: 10px;
+  }
+
+  #autoRecordSummary .passcheck-head-right {
+    width: auto;
+    margin-left: auto;
+    align-items: center;
+    justify-content: flex-end;
+    flex-wrap: nowrap;
+  }
+
+  #autoRecordSummary .passcheck-period-wrap {
+    margin-left: 0;
+  }
+}
+
 .passcheck-metrics {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
