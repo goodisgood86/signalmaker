@@ -1,0 +1,92 @@
+name: Deploy Main
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-main
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  deploy-vps:
+    name: Deploy VPS
+    runs-on: ubuntu-latest
+    steps:
+      - name: Load SSH private key
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.VPS_SSH_KEY }}
+
+      - name: Add VPS host key
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_PORT: ${{ secrets.VPS_PORT }}
+        run: |
+          set -euo pipefail
+          test -n "${VPS_HOST}"
+          PORT="${VPS_PORT:-22}"
+          mkdir -p ~/.ssh
+          ssh-keyscan -p "${PORT}" -H "${VPS_HOST}" >> ~/.ssh/known_hosts
+
+      - name: Pull latest and restart service
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_PORT: ${{ secrets.VPS_PORT }}
+          DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
+          DEPLOY_SERVICE: ${{ vars.DEPLOY_SERVICE }}
+        run: |
+          set -euo pipefail
+          test -n "${VPS_HOST}"
+          test -n "${VPS_USER}"
+          PORT="${VPS_PORT:-22}"
+          APP_PATH="${DEPLOY_PATH:-/opt/coin}"
+          SERVICE="${DEPLOY_SERVICE:-signalmaker.service}"
+          ssh -p "${PORT}" "${VPS_USER}@${VPS_HOST}" "set -euo pipefail; \
+            cd '${APP_PATH}'; \
+            git fetch origin; \
+            git checkout main; \
+            git pull --ff-only origin main; \
+            git rev-parse --short HEAD; \
+            if command -v sudo >/dev/null 2>&1; then sudo systemctl restart '${SERVICE}'; else systemctl restart '${SERVICE}'; fi; \
+            if command -v sudo >/dev/null 2>&1; then sudo systemctl is-active '${SERVICE}'; else systemctl is-active '${SERVICE}'; fi"
+
+  healthcheck:
+    name: Check Domains
+    runs-on: ubuntu-latest
+    needs: deploy-vps
+    steps:
+      - name: Check production domains (required)
+        run: |
+          set -euo pipefail
+          for domain in signalmaker.pro auto.signalmaker.pro; do
+            code="$(curl -sS -o /tmp/${domain}.html -w '%{http_code}' https://${domain}/static/index.html)"
+            echo "${domain} => ${code}"
+            test "${code}" = "200"
+          done
+
+      - name: Check railway domain (best effort)
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          domain="signalmaker-production.up.railway.app"
+          ok="0"
+          for _ in $(seq 1 20); do
+            code="$(curl -sS -o /tmp/railway.html -w '%{http_code}' https://${domain}/static/index.html || true)"
+            echo "${domain} => ${code}"
+            if [ "${code}" = "200" ]; then
+              ok="1"
+              break
+            fi
+            sleep 15
+          done
+          if [ "${ok}" != "1" ]; then
+            echo "Railway domain check did not pass within retry window."
+            exit 1
+          fi

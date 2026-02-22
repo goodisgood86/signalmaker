@@ -13,6 +13,26 @@ uvicorn app.main:app --reload --port 8000
 
 브라우저에서 `http://127.0.0.1:8000` 접속.
 
+## 자동 배포 (main 1회 푸시)
+
+`main` 브랜치에 push 하면 GitHub Actions가 VPS를 자동 배포합니다.
+Railway 도메인은 기존 GitHub 연동 자동배포를 그대로 사용합니다.
+
+워크플로 파일:
+- `.github/workflows/deploy-main.yml`
+
+GitHub 저장소 설정(1회):
+
+1) `Settings > Secrets and variables > Actions > Secrets`
+- `VPS_HOST`: 예) `signalmaker.pro`
+- `VPS_USER`: 예) `root`
+- `VPS_SSH_KEY`: 배포용 개인키(PEM 전체)
+- `VPS_PORT`: 선택(기본 22)
+
+2) `Settings > Secrets and variables > Actions > Variables` (선택)
+- `DEPLOY_PATH`: 기본 `/opt/coin`
+- `DEPLOY_SERVICE`: 기본 `signalmaker.service`
+
 ## 운영 환경변수 (Supabase)
 
 ```bash
