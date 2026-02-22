@@ -445,8 +445,18 @@ def _cfg_unlock_expected_hash() -> str:
     return "a0a4054e33da8599fda33e887347373e38dc9c99c1ad770ad06292a8a3c89487"
 
 
+def _cfg_password_unlock_enabled() -> bool:
+    raw = str(os.getenv("APP_CONFIG_UNLOCK_PASSWORD_ENABLED", "")).strip().lower()
+    if raw:
+        return raw not in {"0", "false", "no", "off"}
+    # 기본 정책: 구글 잠금해제가 설정되면 비밀번호 해제는 비활성
+    return not _cfg_google_enabled()
+
+
 def _cfg_unlock_enabled() -> bool:
-    return bool(_cfg_unlock_expected_hash())
+    password_enabled = _cfg_password_unlock_enabled()
+    password_available = bool(_cfg_unlock_expected_hash()) if password_enabled else False
+    return bool(password_available or _cfg_google_enabled())
 
 
 def _cfg_google_client_id() -> str:
@@ -2023,6 +2033,7 @@ def api_auto_trade_config_lock_status(
             "client_id": _cfg_google_client_id(),
             "allowed_emails": sorted(_cfg_google_allowed_emails()),
         },
+        "password_enabled": _cfg_password_unlock_enabled(),
     }
 
 
@@ -2034,6 +2045,8 @@ def api_auto_trade_config_lock_unlock(
     enabled = _cfg_unlock_enabled()
     if not enabled:
         return {"ok": True, "enabled": False, "unlocked": True}
+    if not _cfg_password_unlock_enabled():
+        raise HTTPException(status_code=403, detail="password unlock is disabled")
     password = str(payload.get("password", "")).strip()
     if not password:
         raise HTTPException(status_code=400, detail="password is required")
