@@ -109,6 +109,7 @@ let binanceCollateralLoading = false;
 let configDirty = true;
 let autoRunActive = false;
 let latestCollateral = null;
+let latestStats = null;
 let collateralInsufficient = false;
 let collateralGuardBusy = false;
 let lastCollateralFetchMs = 0;
@@ -1372,6 +1373,7 @@ function renderBinanceLink(link) {
   }
   if (linked) setBnCollateralCards("조회중...", "조회중...", "조회중...");
   else setBnCollateralCards("-", "-", "-");
+  renderSummary(latestStats || {});
   updateTopRunButton();
 }
 
@@ -1387,6 +1389,7 @@ function renderBinanceCollateral(collateral) {
   const futTxt = Boolean(fut?.ok) && Number.isFinite(futBal) ? `${fmtUsdt(futBal)} USDT` : "-";
   setBnCollateralCards(totalTxt, spotTxt, futTxt);
   evaluateCollateralState();
+  renderSummary(latestStats || {});
 }
 
 async function loadBinanceCollateral() {
@@ -1577,13 +1580,24 @@ async function runNow() {
 
 function renderSummary(stats) {
   if (!summaryEl) return;
-  const s = stats || {};
+  latestStats = stats && typeof stats === "object" ? stats : latestStats || {};
+  const s = latestStats || {};
   latestOpenCount = Number.isFinite(Number(s.open)) ? Number(s.open) : latestOpenCount;
   const winRate = Number.isFinite(Number(s.win_rate)) ? Number(s.win_rate) : 0;
+  const realizedPnl = Number(s.realized_pnl_usdt || 0);
+  const collateralSeed = Number(latestCollateral?.total_usdt ?? NaN);
+  const statsSeed = Number(s.realized_basis_seed_usdt ?? NaN);
+  const fallbackPct = Number(s.realized_pnl_pct ?? NaN);
+  let realizedPnlPct = Number.isFinite(fallbackPct) ? fallbackPct : 0;
+  if (Number.isFinite(collateralSeed) && collateralSeed > 0) {
+    realizedPnlPct = (realizedPnl / collateralSeed) * 100.0;
+  } else if (Number.isFinite(statsSeed) && statsSeed > 0) {
+    realizedPnlPct = (realizedPnl / statsSeed) * 100.0;
+  }
   const cards = [
     ["총 거래", `${Number(s.total || 0).toLocaleString("ko-KR")} (${winRate.toFixed(1)}%)`],
-    ["손익금액", `${fmtSigned(Number(s.realized_pnl_usdt || 0))} USDT`],
-    ["손익%", `${Number(s.realized_pnl_pct || 0).toFixed(2)}%`],
+    ["손익금액", `${fmtSigned(realizedPnl)} USDT`],
+    ["손익%(실시드)", `${Number(realizedPnlPct || 0).toFixed(2)}%`],
   ];
   summaryEl.innerHTML = cards.map((x) => `<div class="stat"><div class="stat-k">${x[0]}</div><div class="stat-v">${x[1]}</div></div>`).join("");
   updateCurrentTradeStateChip();
