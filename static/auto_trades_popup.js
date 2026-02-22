@@ -650,7 +650,8 @@ function renderGoogleUnlockButton(retry = 0) {
     window.google.accounts.id.renderButton(targetEl, {
       type: "standard",
       theme: "filled_black",
-      size: "large",
+      // medium/small에서는 개인화 버튼(계정명 노출)을 표시하지 않는다.
+      size: "medium",
       text: "signin_with",
       shape: "pill",
       width: btnWidth,
@@ -661,6 +662,8 @@ function renderGoogleUnlockButton(retry = 0) {
     if (cfgGoogleInitClientId !== cfgGoogleLogin.clientId) {
       window.google.accounts.id.initialize({
         client_id: cfgGoogleLogin.clientId,
+        use_fedcm_for_button: false,
+        button_auto_select: false,
         callback: (resp) => {
           unlockByGoogleCredential(resp?.credential || "").catch(() => {});
         },
