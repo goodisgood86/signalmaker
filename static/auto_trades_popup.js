@@ -650,7 +650,7 @@ function renderGoogleUnlockButton(retry = 0) {
   const renderInto = (targetEl) => {
     if (!targetEl) return;
     targetEl.innerHTML = "";
-    const btnWidth = Math.max(180, Math.min(320, Math.round(targetEl.getBoundingClientRect().width || 260)));
+    const btnWidth = Math.max(180, Math.min(320, Math.round(targetEl.getBoundingClientRect().width || 320)));
     window.google.accounts.id.renderButton(targetEl, {
       type: "standard",
       theme: "filled_black",
