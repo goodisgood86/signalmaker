@@ -646,7 +646,6 @@ function renderGoogleUnlockButton(retry = 0) {
   const renderInto = (targetEl) => {
     if (!targetEl) return;
     targetEl.innerHTML = "";
-    const btnWidth = Math.max(180, Math.min(320, Math.round(targetEl.getBoundingClientRect().width || 320)));
     window.google.accounts.id.renderButton(targetEl, {
       type: "standard",
       theme: "filled_black",
@@ -654,9 +653,21 @@ function renderGoogleUnlockButton(retry = 0) {
       size: "medium",
       text: "signin_with",
       shape: "pill",
-      width: btnWidth,
       locale: "ko",
     });
+    const tidyFrame = (retry = 0) => {
+      const frame = targetEl.querySelector("iframe");
+      if (!frame) {
+        if (retry < 10) setTimeout(() => tidyFrame(retry + 1), 60);
+        return;
+      }
+      frame.style.border = "0";
+      frame.style.borderRadius = "999px";
+      frame.style.display = "block";
+      frame.style.margin = "0 auto";
+      frame.style.background = "transparent";
+    };
+    tidyFrame();
   };
   try {
     if (cfgGoogleInitClientId !== cfgGoogleLogin.clientId) {

@@ -148,12 +148,12 @@
         display: none !important;
       }
       .center-google-modal-dialog {
-        width: min(520px, 100%);
+        width: min(500px, 100%);
         border-radius: 16px;
         border: 1px solid rgba(185, 211, 255, 0.34);
         background: linear-gradient(180deg, rgba(8, 18, 38, 0.98), rgba(3, 10, 24, 0.98));
         box-shadow: 0 24px 58px rgba(0, 0, 0, 0.48);
-        padding: 16px;
+        padding: 14px;
       }
       .center-google-modal-head {
         display: flex;
@@ -163,9 +163,9 @@
         margin-bottom: 8px;
       }
       .center-google-modal-title {
-        font-size: 30px;
-        font-weight: 860;
-        letter-spacing: -0.3px;
+        font-size: 24px;
+        font-weight: 840;
+        letter-spacing: -0.2px;
       }
       .center-google-modal-close {
         width: auto;
@@ -176,16 +176,16 @@
         align-self: flex-start;
       }
       .center-google-modal-desc {
-        font-size: 18px;
-        line-height: 1.45;
+        font-size: 14px;
+        line-height: 1.4;
         color: rgba(234, 243, 255, 0.9);
       }
       .center-google-modal-body {
-        margin-top: 14px;
+        margin-top: 10px;
         border-radius: 12px;
         border: 1px solid rgba(172, 206, 255, 0.28);
         background: rgba(9, 19, 39, 0.84);
-        padding: 12px;
+        padding: 10px;
       }
       .center-google-modal-state {
         border: 1px solid rgba(84, 228, 177, 0.3);
@@ -208,7 +208,9 @@
         word-break: break-all;
       }
       .center-google-modal-btn-wrap {
-        margin-top: 10px;
+        margin-top: 8px;
+        display: flex;
+        justify-content: center;
       }
       .center-google-modal-btn-wrap[hidden] {
         display: none !important;
@@ -218,7 +220,8 @@
         justify-content: center;
       }
       .center-google-modal-btn > div {
-        width: min(320px, 100%) !important;
+        width: auto !important;
+        max-width: 100%;
         line-height: 0;
         background: transparent !important;
         border-radius: 999px;
@@ -253,10 +256,12 @@
         pointer-events: none;
       }
       .center-google-modal-note {
-        margin-top: 10px;
-        min-height: 16px;
+        margin-top: 8px;
         font-size: 12px;
         color: rgba(234, 243, 255, 0.82);
+      }
+      .center-google-modal-note:empty {
+        display: none;
       }
       .center-google-modal-note.warn {
         color: rgba(255, 189, 206, 0.95);
@@ -1102,13 +1107,13 @@
           padding: 0 10px;
         }
         .center-google-modal-dialog {
-          padding: 14px;
+          padding: 12px;
         }
         .center-google-modal-title {
-          font-size: 26px;
+          font-size: 21px;
         }
         .center-google-modal-desc {
-          font-size: 16px;
+          font-size: 13px;
         }
       }
       @media (max-width: 420px) {
@@ -1148,10 +1153,10 @@
           max-width: 186px;
         }
         .center-google-modal-title {
-          font-size: 23px;
+          font-size: 19px;
         }
         .center-google-modal-desc {
-          font-size: 14px;
+          font-size: 12px;
         }
         .center-google-modal-actions {
           grid-template-columns: 1fr;
@@ -1459,6 +1464,6 @@
       </div>
     </div>
     <script src="https://accounts.google.com/gsi/client" async defer></script>
-    <script src="/static/auto_trades_popup.js?v=20260222za"></script>
+    <script src="/static/auto_trades_popup.js?v=20260222zb"></script>
   </body>
 </html>
